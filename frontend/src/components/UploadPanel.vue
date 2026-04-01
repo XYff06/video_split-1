@@ -1,5 +1,5 @@
 <template>
-  <section class="panel">
+  <section class="panel panel-upload">
     <h2>视频上传</h2>
     <p class="panel-subtitle">支持多文件上传、拖拽、去重，提交后自动开启实时结果流。</p>
 
@@ -11,14 +11,14 @@
       @drop.prevent="onDrop"
       @click="openFilePicker"
     >
-      <p>点击选择视频或拖拽到此处</p>
+      <p class="drop-zone-title">点击选择视频或拖拽到此处</p>
       <p class="hint-text">仅接收 video/*，会自动忽略非视频文件</p>
       <input ref="fileInputRef" type="file" multiple accept="video/*" class="hidden" @change="onFileChange" />
     </div>
 
     <UploadFileList :files="visibleFiles" @remove="removeFile" />
 
-    <button v-if="files.length > 3" class="ghost-button" @click="isModalVisible = true">
+    <button v-if="files.length > 3" class="ghost-button queue-more-button" @click="isModalVisible = true">
       展示更多（{{ files.length - 3 }}）
     </button>
 
@@ -89,3 +89,4 @@ function submit() {
   emit('submit')
 }
 </script>
+

@@ -14,6 +14,8 @@
 
 <script setup>
 import UploadFileList from './UploadFileList.vue'
+
 defineProps({ files: { type: Array, default: () => [] } })
 defineEmits(['close', 'remove'])
 </script>
+

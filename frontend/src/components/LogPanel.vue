@@ -28,3 +28,4 @@ defineProps({
   taskLogs: { type: Array, default: () => [] }
 })
 </script>
+

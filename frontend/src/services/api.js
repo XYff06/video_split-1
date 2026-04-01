@@ -6,7 +6,14 @@ const backendClient = axios.create({
 
 export async function createProcessingTask(videoFiles) {
   const formData = new FormData()
-  videoFiles.forEach((file) => formData.append('videos', file))
+
+  videoFiles.forEach((file) => {
+    const actualFile = file?.rawFile instanceof File ? file.rawFile : file
+    if (actualFile instanceof File) {
+      formData.append('videos', actualFile, actualFile.name)
+    }
+  })
+
   const response = await backendClient.post('/api/tasks', formData)
   return response.data
 }
@@ -33,3 +40,4 @@ export function openTaskStream(taskId, handlers) {
 
   return eventSource
 }
+

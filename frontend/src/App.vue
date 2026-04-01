@@ -1,10 +1,5 @@
 <template>
   <div class="page">
-    <header class="top-header">
-      <h1>视频上传 → 场景分割 → 合并预览 Demo</h1>
-      <p>Flask + SSE + Vue3，逐视频实时增量返回。</p>
-    </header>
-
     <main class="main-grid">
       <UploadPanel
         :files="uploadFileQueue"
@@ -52,9 +47,10 @@ const videoResults = ref([])
 const selectedVideoIndex = ref(-1)
 const selectedSegmentIndex = ref(0)
 const uploadErrorMessage = ref('')
-const sseConnectionStatus = ref('disconnected')
 const taskLogs = ref([])
 const currentVideoPage = ref(0)
+
+const allowedVideoExtensions = ['mp4', 'mov', 'mkv', 'avi', 'webm', 'm4v', 'wmv']
 
 let eventSourceInstance = null
 
@@ -74,29 +70,45 @@ const resultStatusText = computed(() => {
   if (taskStatus.value === 'processing') {
     return `正在持续接收处理结果，已完成 ${completedVideos.value} / ${totalVideos.value}`
   }
+
   if (taskStatus.value === 'completed') {
     return `处理完成，共 ${totalVideos.value} 个视频。`
   }
-  return '尚未开始处理。上传后点击“开始处理”，结果会实时出现。'
+
+  return '尚未开始处理。上传后点击“开始处理”，结果会实时出现在右侧。'
 })
 
 function buildFileUniqueKey(file) {
   return `${file.name}__${file.size}__${file.lastModified}`
 }
 
+function isVideoFile(file) {
+  const fileExtension = file.name?.split('.').pop()?.toLowerCase() || ''
+  return file.type?.startsWith('video/') || allowedVideoExtensions.includes(fileExtension)
+}
+
 function appendFiles(candidateFiles) {
-  const acceptedFiles = candidateFiles.filter((file) => file.type.startsWith('video/'))
+  const acceptedFiles = candidateFiles.filter((file) => isVideoFile(file))
   const existingKeys = new Set(uploadFileQueue.value.map((item) => item.uniqueKey))
 
   acceptedFiles.forEach((file) => {
     const uniqueKey = buildFileUniqueKey(file)
     if (!existingKeys.has(uniqueKey)) {
-      uploadFileQueue.value.push({ ...file, uniqueKey })
+      uploadFileQueue.value.push({
+        uniqueKey,
+        rawFile: file,
+        name: file.name,
+        size: file.size,
+        type: file.type,
+        lastModified: file.lastModified
+      })
       existingKeys.add(uniqueKey)
     }
   })
 
-  if (acceptedFiles.length !== candidateFiles.length) {
+  if (acceptedFiles.length === 0 && candidateFiles.length > 0) {
+    uploadErrorMessage.value = '当前选择的文件里没有可用的视频文件。'
+  } else if (acceptedFiles.length !== candidateFiles.length) {
     uploadErrorMessage.value = '检测到非视频文件，已自动忽略。'
   } else {
     uploadErrorMessage.value = ''
@@ -109,28 +121,33 @@ function removeFileFromQueue(uniqueKey) {
 
 async function startProcessing() {
   if (!uploadFileQueue.value.length || taskStatus.value === 'processing') return
+
   uploadErrorMessage.value = ''
   taskStatus.value = 'processing'
   videoResults.value = []
   taskLogs.value = []
   selectedVideoIndex.value = -1
   selectedSegmentIndex.value = 0
+  currentVideoPage.value = 0
 
   try {
-    const response = await createProcessingTask(uploadFileQueue.value)
+    const response = await createProcessingTask(uploadFileQueue.value.map((item) => item.rawFile))
     taskId.value = response.taskId
     totalVideos.value = response.totalVideos
     completedVideos.value = 0
     connectSseStream(response.taskId)
   } catch (error) {
     taskStatus.value = 'idle'
-    uploadErrorMessage.value = error?.response?.data?.error || '创建任务失败，请检查后端服务。'
+    uploadErrorMessage.value =
+      error?.response?.data?.error ||
+      error?.response?.data?.message ||
+      error?.message ||
+      '创建任务失败，请检查后端服务。'
   }
 }
 
 function connectSseStream(newTaskId) {
   eventSourceInstance?.close()
-  sseConnectionStatus.value = 'connecting'
 
   eventSourceInstance = openTaskStream(newTaskId, {
     onSnapshot(snapshot) {
@@ -142,7 +159,6 @@ function connectSseStream(newTaskId) {
         videoResults.value = snapshot.videoResults
         ensureSelectedVideoExists()
       }
-      sseConnectionStatus.value = 'connected'
     },
     onVideoResult(payload) {
       completedVideos.value = payload.completedVideos
@@ -154,6 +170,7 @@ function connectSseStream(newTaskId) {
       if (selectedVideoIndex.value === -1) {
         selectedVideoIndex.value = 0
         selectedSegmentIndex.value = 0
+        currentVideoPage.value = 0
       }
     },
     onCompleted(payload) {
@@ -161,11 +178,9 @@ function connectSseStream(newTaskId) {
       completedVideos.value = payload.completedVideos
       totalVideos.value = payload.totalVideos
       taskLogs.value = payload.taskLogs || []
-      sseConnectionStatus.value = 'completed'
     },
     onError() {
-      sseConnectionStatus.value = 'error'
-      uploadErrorMessage.value = 'SSE连接断开，请刷新后重试。'
+      uploadErrorMessage.value = 'SSE 连接已断开，请刷新页面后重试。'
       eventSourceInstance?.close()
     }
   })
@@ -176,6 +191,7 @@ function ensureSelectedVideoExists() {
     selectedVideoIndex.value = -1
     return
   }
+
   if (selectedVideoIndex.value < 0 || selectedVideoIndex.value >= videoResults.value.length) {
     selectedVideoIndex.value = 0
     selectedSegmentIndex.value = 0
@@ -203,3 +219,4 @@ onBeforeUnmount(() => {
   eventSourceInstance?.close()
 })
 </script>
+

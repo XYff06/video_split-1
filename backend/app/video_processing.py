@@ -9,9 +9,10 @@ from pathlib import Path
 from queue import Queue
 from threading import Lock
 from typing import Dict, List, Optional, Tuple
+from urllib.parse import quote
 from uuid import uuid4
 
-from scenedetect import detect
+from scenedetect import ContentDetector, SceneManager, open_video
 from scenedetect.video_splitter import split_video_ffmpeg
 
 
@@ -80,6 +81,19 @@ def make_log(level: str, message: str, video_name: Optional[str] = None) -> dict
     ))
 
 
+def build_media_url(base_public_url: str, data_root: Path, file_path: Path) -> str:
+    """
+    Build a browser-playable URL from a real file path under backend/data.
+
+    The Flask media route serves files from DATA_ROOT, so preview URLs must keep the
+    `tasks/<task_id>/...` prefix. Without that prefix the browser requests the wrong path
+    and the merged preview clip returns 404 even though the file actually exists on disk.
+    """
+
+    relative_path = file_path.relative_to(data_root).as_posix()
+    return f"{base_public_url}/media/{quote(relative_path, safe='/')}"
+
+
 def detect_and_split_original_scenes(
     source_video_path: Path,
     scene_output_directory: Path,
@@ -89,7 +103,13 @@ def detect_and_split_original_scenes(
 ) -> List[dict]:
     """Detect scenes and use PySceneDetect's ffmpeg splitter to create real scene files."""
     append_log("info", f"Starting scene detection for video: {video_name}")
-    detected_scenes = detect(str(source_video_path))
+    data_root = scene_output_directory.parents[3]
+
+    video_stream = open_video(str(source_video_path))
+    scene_manager = SceneManager()
+    scene_manager.add_detector(ContentDetector())
+    scene_manager.detect_scenes(video=video_stream)
+    detected_scenes = scene_manager.get_scene_list(start_in_scene=True)
 
     if not detected_scenes:
         raise RuntimeError("No scenes were detected by PySceneDetect.")
@@ -100,7 +120,7 @@ def detect_and_split_original_scenes(
     split_video_ffmpeg(
         input_video_path=str(source_video_path),
         scene_list=detected_scenes,
-        output_dir=str(scene_output_directory),
+        output_dir=scene_output_directory,
         show_progress=False,
     )
 
@@ -125,7 +145,7 @@ def detect_and_split_original_scenes(
                 "end_seconds": end_seconds,
                 "duration_seconds": duration_seconds,
                 "file_path": str(scene_file_path),
-                "public_url": f"{base_public_url}/media/{scene_file_path.relative_to(scene_output_directory.parent.parent).as_posix()}",
+                "public_url": build_media_url(base_public_url, data_root, scene_file_path),
             }
         )
 
@@ -216,6 +236,7 @@ def merge_grouped_scene_files(
 ) -> List[dict]:
     merged_output_directory.mkdir(parents=True, exist_ok=True)
     merged_segments: List[dict] = []
+    data_root = merged_output_directory.parents[3]
 
     for group_index, scene_indices in enumerate(chosen_grouping_plan, start=1):
         selected_scenes = [original_scenes[idx - 1] for idx in scene_indices]
@@ -240,9 +261,15 @@ def merge_grouped_scene_files(
             "copy",
             str(merged_file_path),
         ]
-        command_result = subprocess.run(ffmpeg_command, capture_output=True, text=True)
+        command_result = subprocess.run(
+            ffmpeg_command,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
+        )
         if command_result.returncode != 0:
-            raise RuntimeError(f"ffmpeg merge failed for group {group_index}: {command_result.stderr}")
+            stderr_text = command_result.stderr.decode("utf-8", errors="replace")
+            raise RuntimeError(f"ffmpeg merge failed for group {group_index}: {stderr_text}")
 
         concat_file_path.unlink(missing_ok=True)
 
@@ -258,7 +285,7 @@ def merge_grouped_scene_files(
                 "source_scene_index_range": [scene_indices[0], scene_indices[-1]],
                 "source_scene_files": [scene["file_path"] for scene in selected_scenes],
                 "export_file_path": str(merged_file_path),
-                "export_public_url": f"{base_public_url}/media/{merged_file_path.relative_to(merged_output_directory.parent.parent).as_posix()}",
+                "export_public_url": build_media_url(base_public_url, data_root, merged_file_path),
             }
         )
 

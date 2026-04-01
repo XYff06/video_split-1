@@ -1,5 +1,5 @@
 <template>
-  <section class="panel">
+  <section class="panel panel-result">
     <h2>处理结果</h2>
     <p class="panel-subtitle">{{ statusText }}</p>
 
@@ -7,6 +7,7 @@
       :videos="videoResults"
       :selected-video-index="selectedVideoIndex"
       :current-page="currentVideoPage"
+      :page-size="5"
       @select-video="$emit('select-video', $event)"
       @page-change="$emit('change-video-page', $event)"
     />
@@ -52,3 +53,4 @@ defineProps({
 
 defineEmits(['select-video', 'change-video-page', 'prev-segment', 'next-segment'])
 </script>
+

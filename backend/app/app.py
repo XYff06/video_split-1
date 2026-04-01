@@ -37,7 +37,7 @@ def health() -> Any:
 def create_task() -> Any:
     upload_files = request.files.getlist("videos")
     if not upload_files:
-        return jsonify({"error": "No video files uploaded."}), 400
+        return jsonify({"error": "没有接收到任何视频文件。"}), 400
 
     task = store.create_task(total_videos=len(upload_files))
     task_directory = TASK_OUTPUT_ROOT / task.task_id
@@ -47,7 +47,7 @@ def create_task() -> Any:
     saved_video_paths = save_uploaded_files(upload_files, upload_directory)
 
     if not saved_video_paths:
-        return jsonify({"error": "Uploaded files are empty or invalid."}), 400
+        return jsonify({"error": "上传文件为空或不是合法视频文件。"}), 400
 
     task.task_logs.append(make_log("info", f"Saved {len(saved_video_paths)} video files."))
 
@@ -63,7 +63,7 @@ def create_task() -> Any:
             "taskId": task.task_id,
             "totalVideos": len(saved_video_paths),
             "status": task.status,
-            "message": "Task created successfully. Connect to SSE stream for incremental results.",
+            "message": "任务创建成功，请连接 SSE 流持续接收增量结果。",
         }
     )
 
@@ -126,7 +126,7 @@ def process_task_videos(task_id: str, saved_video_paths, task_directory: Path) -
 def stream_task(task_id: str) -> Any:
     task = store.get_task(task_id)
     if not task:
-        return jsonify({"error": "Task not found."}), 404
+        return jsonify({"error": "未找到对应任务。"}), 404
 
     def event_generator():
         initial_payload = {
@@ -157,7 +157,7 @@ def serve_media(relative_path: str) -> Any:
 def delete_task_artifacts(task_id: str) -> Any:
     cleanup_directory(UPLOAD_ROOT / task_id)
     cleanup_directory(TASK_OUTPUT_ROOT / task_id)
-    return jsonify({"message": "Task files removed."})
+    return jsonify({"message": "任务输出文件已删除。"})
 
 
 if __name__ == "__main__":

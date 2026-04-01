@@ -1,0 +1,6 @@
+Flask==3.0.3
+Flask-Cors==4.0.1
+scenedetect[opencv]==0.6.4
+opencv-python==4.10.0.84
+numpy==1.26.4
+moviepy==1.0.3

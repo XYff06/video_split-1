@@ -25,6 +25,7 @@ body {
   grid-template-columns: 3fr 7fr;
   gap: 18px;
   align-items: start;
+  margin-bottom: 18px;
 }
 
 .panel {
@@ -214,7 +215,6 @@ body {
 .tab-button {
   background: #e2e8f0;
   overflow: hidden;
-  text-overflow: ellipsis;
 }
 
 .tab-button.active {
@@ -228,6 +228,41 @@ body {
 
 .video-name-button {
   width: 100%;
+}
+
+.video-name-viewport {
+  position: relative;
+  width: 100%;
+  overflow: hidden;
+  display: block;
+}
+
+.video-name-track {
+  display: inline-flex;
+  align-items: center;
+  min-width: 100%;
+  white-space: nowrap;
+}
+
+.video-name-track.scrolling {
+  width: max-content;
+  animation: video-name-marquee 9s linear infinite;
+}
+
+.video-name-copy {
+  flex: 0 0 auto;
+}
+
+.video-name-gap {
+  flex: 0 0 auto;
+  padding: 0 12px;
+}
+
+.video-name-measure {
+  position: absolute;
+  visibility: hidden;
+  pointer-events: none;
+  white-space: nowrap;
 }
 
 .segment-layout {
@@ -296,12 +331,71 @@ body {
   color: #166534;
 }
 
+.status.error {
+  color: #b91c1c;
+}
+
 .summary-card {
   margin-top: 14px;
   border: 1px solid #e2e8f0;
   border-radius: 12px;
   padding: 14px;
   background: #fff;
+}
+
+.prompt-panel {
+  min-height: 320px;
+}
+
+.prompt-panel-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+}
+
+.prompt-meta {
+  min-width: 220px;
+  padding: 14px;
+  border-radius: 12px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+}
+
+.prompt-meta p {
+  margin: 0 0 8px;
+  line-height: 1.6;
+}
+
+.prompt-shell {
+  margin-top: 12px;
+}
+
+.prompt-textarea {
+  width: 100%;
+  min-height: 420px;
+  resize: vertical;
+  border: 1px solid #cbd5e1;
+  border-radius: 14px;
+  padding: 16px;
+  font: inherit;
+  line-height: 1.8;
+  color: #0f172a;
+  background: #f8fafc;
+}
+
+.prompt-empty {
+  min-height: 220px;
+  border: 1px solid #e2e8f0;
+  border-radius: 14px;
+  padding: 24px;
+  background: #f8fafc;
+  color: #64748b;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  line-height: 1.8;
 }
 
 .summary-card h4,
@@ -364,6 +458,10 @@ body {
     grid-template-columns: 1fr;
   }
 
+  .prompt-panel-header {
+    flex-direction: column;
+  }
+
   .video-tab-items {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
@@ -371,5 +469,15 @@ body {
   .page-edge-button,
   .segment-side-button {
     width: 100%;
+  }
+}
+
+@keyframes video-name-marquee {
+  0% {
+    transform: translateX(0);
+  }
+
+  100% {
+    transform: translateX(calc(-50% - 12px));
   }
 }

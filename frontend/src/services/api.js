@@ -29,6 +29,18 @@ export function openTaskStream(taskId, handlers) {
     handlers.onVideoResult?.(JSON.parse(event.data))
   })
 
+  eventSource.addEventListener('video_processing_started', (event) => {
+    handlers.onVideoProcessingStarted?.(JSON.parse(event.data))
+  })
+
+  eventSource.addEventListener('segments_ready', (event) => {
+    handlers.onSegmentsReady?.(JSON.parse(event.data))
+  })
+
+  eventSource.addEventListener('segment_analysis', (event) => {
+    handlers.onSegmentAnalysis?.(JSON.parse(event.data))
+  })
+
   eventSource.addEventListener('task_completed', (event) => {
     handlers.onCompleted?.(JSON.parse(event.data))
     eventSource.close()
@@ -40,4 +52,3 @@ export function openTaskStream(taskId, handlers) {
 
   return eventSource
 }
-

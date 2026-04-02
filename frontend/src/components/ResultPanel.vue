@@ -12,7 +12,7 @@
       @page-change="$emit('change-video-page', $event)"
     />
 
-    <SegmentPreviewCard
+    <SegmentPreviewDisplay
       :video-result="currentVideoResult"
       :current-segment="currentSegment"
       :can-prev="canPreviousSegment"
@@ -21,7 +21,7 @@
       @next-segment="$emit('next-segment')"
     />
 
-    <div class="summary-card" v-if="currentVideoResult">
+    <div v-if="isDeveloperMode && currentVideoResult" class="summary-card">
       <h4>处理摘要</h4>
       <p>视频名：{{ currentVideoResult.video_name }}</p>
       <p>状态：{{ currentVideoResult.status }}</p>
@@ -29,14 +29,20 @@
       <p>合并片段数：{{ currentVideoResult.summary?.merged_segment_count ?? 0 }}</p>
     </div>
 
-    <LogPanel :current-video-logs="currentVideoLogs" :task-logs="taskLogs" />
+    <LogPanel
+      v-if="isDeveloperMode"
+      :current-video-logs="currentVideoLogs"
+      :task-logs="taskLogs"
+    />
   </section>
 </template>
 
 <script setup>
 import LogPanel from './LogPanel.vue'
-import SegmentPreviewCard from './SegmentPreviewCard.vue'
+import SegmentPreviewDisplay from './SegmentPreviewDisplay.vue'
 import VideoTabs from './VideoTabs.vue'
+
+const isDeveloperMode = import.meta.env.DEV
 
 defineProps({
   statusText: { type: String, default: '' },
@@ -53,4 +59,3 @@ defineProps({
 
 defineEmits(['select-video', 'change-video-page', 'prev-segment', 'next-segment'])
 </script>
-

@@ -6,7 +6,7 @@
 
     <div class="preview-card">
       <template v-if="videoResult">
-        <template v-if="videoResult.status === 'success' && currentSegment">
+        <template v-if="currentSegment">
           <div class="preview-video-shell">
             <video :src="currentSegment.export_public_url" controls class="preview-video" />
           </div>
@@ -15,7 +15,7 @@
             <p>时长：{{ currentSegment.duration_seconds.toFixed(3) }} 秒</p>
             <p v-if="isDeveloperMode">原始索引范围：{{ currentSegment.source_scene_index_range.join(' - ') }}</p>
             <p v-if="isDeveloperMode" class="preview-path">导出文件：{{ currentSegment.export_file_path }}</p>
-            <p class="status success">状态：{{ videoResult.status }}</p>
+            <p class="status" :class="videoResult.status === 'failed' ? 'error' : 'success'">状态：{{ videoResult.status }}</p>
           </div>
         </template>
 

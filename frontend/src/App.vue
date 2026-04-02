@@ -29,6 +29,11 @@
         @next-segment="goToNextSegment"
       />
     </main>
+
+    <PromptPanel
+      :current-video-result="currentVideoResult"
+      :current-segment="currentSegment"
+    />
   </div>
 </template>
 
@@ -36,6 +41,7 @@
 import { computed, onBeforeUnmount, ref } from 'vue'
 import UploadPanel from './components/UploadPanel.vue'
 import ResultPanel from './components/ResultPanel.vue'
+import PromptPanel from './components/PromptPanel.vue'
 import { createProcessingTask, openTaskStream } from './services/api'
 
 const uploadFileQueue = ref([])
@@ -57,7 +63,7 @@ let eventSourceInstance = null
 const currentVideoResult = computed(() => videoResults.value[selectedVideoIndex.value] ?? null)
 const currentSegment = computed(() => {
   const activeVideo = currentVideoResult.value
-  if (!activeVideo || activeVideo.status !== 'success') return null
+  if (!activeVideo) return null
   return activeVideo.merged_segments[selectedSegmentIndex.value] ?? null
 })
 const currentVideoLogs = computed(() => currentVideoResult.value?.logs ?? [])
@@ -160,12 +166,37 @@ function connectSseStream(newTaskId) {
         ensureSelectedVideoExists()
       }
     },
+    onVideoProcessingStarted(payload) {
+      taskStatus.value = payload.taskStatus
+      taskLogs.value = payload.taskLogs || []
+      videoResults.value[payload.videoIndex] = payload.videoResult
+      ensureSelectedVideoExists()
+    },
+    onSegmentsReady(payload) {
+      taskStatus.value = payload.taskStatus
+      taskLogs.value = payload.taskLogs || []
+
+      const targetVideo = videoResults.value[payload.videoIndex]
+      if (!targetVideo) return
+
+      targetVideo.merged_segments = payload.mergedSegments
+      targetVideo.status = 'processing'
+    },
+    onSegmentAnalysis(payload) {
+      taskStatus.value = payload.taskStatus
+      taskLogs.value = payload.taskLogs || []
+
+      const targetVideo = videoResults.value[payload.videoIndex]
+      if (!targetVideo || !Array.isArray(targetVideo.merged_segments)) return
+
+      targetVideo.merged_segments[payload.segmentIndex] = payload.segment
+    },
     onVideoResult(payload) {
       completedVideos.value = payload.completedVideos
       totalVideos.value = payload.totalVideos
       taskStatus.value = payload.taskStatus
       taskLogs.value = payload.taskLogs || []
-      videoResults.value.push(payload.videoResult)
+      videoResults.value[payload.completedVideos - 1] = payload.videoResult
 
       if (selectedVideoIndex.value === -1) {
         selectedVideoIndex.value = 0
@@ -219,4 +250,3 @@ onBeforeUnmount(() => {
   eventSourceInstance?.close()
 })
 </script>
-

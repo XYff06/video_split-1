@@ -30,7 +30,7 @@
       />
     </main>
 
-    <PromptPanel
+    <PromptAddonGrid
       :current-video-result="currentVideoResult"
       :current-segment="currentSegment"
     />
@@ -41,7 +41,7 @@
 import { computed, onBeforeUnmount, ref } from 'vue'
 import UploadPanel from './components/UploadPanel.vue'
 import ResultPanel from './components/ResultPanel.vue'
-import PromptPanel from './components/PromptPanel.vue'
+import PromptAddonGrid from './components/PromptAddonGrid.vue'
 import { createProcessingTask, openTaskStream } from './services/api'
 
 const uploadFileQueue = ref([])
@@ -189,14 +189,33 @@ function connectSseStream(newTaskId) {
       const targetVideo = videoResults.value[payload.videoIndex]
       if (!targetVideo || !Array.isArray(targetVideo.merged_segments)) return
 
-      targetVideo.merged_segments[payload.segmentIndex] = payload.segment
+      const previousSegment = targetVideo.merged_segments[payload.segmentIndex]
+      targetVideo.merged_segments[payload.segmentIndex] = {
+        ...payload.segment,
+        edited_prompt: previousSegment?.edited_prompt,
+        prompt_addons: previousSegment?.prompt_addons
+      }
     },
     onVideoResult(payload) {
       completedVideos.value = payload.completedVideos
       totalVideos.value = payload.totalVideos
       taskStatus.value = payload.taskStatus
       taskLogs.value = payload.taskLogs || []
-      videoResults.value[payload.completedVideos - 1] = payload.videoResult
+      const targetIndex = payload.completedVideos - 1
+      const previousVideoResult = videoResults.value[targetIndex]
+      if (previousVideoResult?.merged_segments?.length && payload.videoResult?.merged_segments?.length) {
+        payload.videoResult.merged_segments = payload.videoResult.merged_segments.map((segment, index) => {
+          const previousSegment = previousVideoResult.merged_segments[index]
+          if (!previousSegment) return segment
+
+          return {
+            ...segment,
+            edited_prompt: previousSegment.edited_prompt,
+            prompt_addons: previousSegment.prompt_addons
+          }
+        })
+      }
+      videoResults.value[targetIndex] = payload.videoResult
 
       if (selectedVideoIndex.value === -1) {
         selectedVideoIndex.value = 0

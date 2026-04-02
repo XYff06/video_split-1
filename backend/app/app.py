@@ -1,5 +1,6 @@
 import json
 import threading
+from copy import deepcopy
 from dataclasses import asdict
 from pathlib import Path
 from typing import Any, Dict
@@ -23,8 +24,19 @@ TASK_OUTPUT_ROOT = DATA_ROOT / "tasks"
 BASE_PUBLIC_URL = "http://127.0.0.1:5000"
 
 app = Flask(__name__)
-CORS(app, resources={r"/*": {"origins": "http://127.0.0.1:5173"}})
-
+CORS(
+    app,
+    resources={
+        r"/*": {
+            "origins": [
+                "http://127.0.0.1:5173",
+                "http://127.0.0.1:4173",
+                "http://localhost:5173",
+                "http://localhost:4173",
+            ]
+        }
+    },
+)
 store = TaskStore()
 
 
@@ -79,6 +91,67 @@ def process_task_videos(task_id: str, saved_video_paths, task_directory: Path) -
     for video_path in saved_video_paths:
         video_name = video_path.name
         task.task_logs.append(make_log("info", f"Start processing video: {video_name}", video_name=video_name))
+        task.video_results.append(
+            {
+                "video_name": video_name,
+                "status": "processing",
+                "error_message": None,
+                "original_scenes": [],
+                "merged_segments": [],
+                "chosen_grouping_plan": [],
+                "summary": {},
+                "logs": [],
+                "analysis_status": "processing",
+            }
+        )
+        video_result_index = len(task.video_results) - 1
+
+        task.event_queue.put(
+            {
+                "event": "video_processing_started",
+                "data": {
+                    "taskId": task.task_id,
+                    "videoIndex": video_result_index,
+                    "videoName": video_name,
+                    "taskStatus": task.status,
+                    "videoResult": deepcopy(task.video_results[video_result_index]),
+                    "taskLogs": task.task_logs,
+                },
+            }
+        )
+
+        def handle_segments_ready(merged_segments):
+            task.video_results[video_result_index]["merged_segments"] = deepcopy(merged_segments)
+            task.event_queue.put(
+                {
+                    "event": "segments_ready",
+                    "data": {
+                        "taskId": task.task_id,
+                        "videoIndex": video_result_index,
+                        "videoName": video_name,
+                        "mergedSegments": deepcopy(merged_segments),
+                        "taskStatus": task.status,
+                        "taskLogs": task.task_logs,
+                    },
+                }
+            )
+
+        def handle_segment_analysis(segment_index, segment_payload):
+            task.video_results[video_result_index]["merged_segments"][segment_index] = deepcopy(segment_payload)
+            task.event_queue.put(
+                {
+                    "event": "segment_analysis",
+                    "data": {
+                        "taskId": task.task_id,
+                        "videoIndex": video_result_index,
+                        "videoName": video_name,
+                        "segmentIndex": segment_index,
+                        "segment": deepcopy(segment_payload),
+                        "taskStatus": task.status,
+                        "taskLogs": task.task_logs,
+                    },
+                }
+            )
 
         result = process_single_video(
             source_video_path=video_path,
@@ -86,10 +159,12 @@ def process_task_videos(task_id: str, saved_video_paths, task_directory: Path) -
             base_public_url=BASE_PUBLIC_URL,
             video_name=video_name,
             task_log_sink=task.task_logs,
+            on_segments_ready=handle_segments_ready,
+            on_segment_analysis=handle_segment_analysis,
         )
 
         result_payload = asdict(result)
-        task.video_results.append(result_payload)
+        task.video_results[video_result_index] = result_payload
         task.completed_videos += 1
         task.status = "completed" if task.completed_videos == task.total_videos else "processing"
 

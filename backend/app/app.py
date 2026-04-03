@@ -8,20 +8,11 @@ from typing import Any, Dict
 from flask import Flask, Response, jsonify, request, send_from_directory
 from flask_cors import CORS
 
-from .video_processing import (
-    TaskStore,
-    cleanup_directory,
-    make_log,
-    process_single_video,
-    save_uploaded_files,
-)
+from .config import DATA_ROOT, TASK_OUTPUT_ROOT, UPLOAD_ROOT
+from .media_utils import cleanup_directory, save_uploaded_files
+from .models import TaskStore, make_log
+from .task_runtime import run_fission_generation, start_fission_generation, start_processing_task, stream_task_events
 
-
-BACKEND_ROOT = Path(__file__).resolve().parent.parent
-DATA_ROOT = BACKEND_ROOT / "data"
-UPLOAD_ROOT = DATA_ROOT / "uploads"
-TASK_OUTPUT_ROOT = DATA_ROOT / "tasks"
-BASE_PUBLIC_URL = "http://127.0.0.1:5000"
 
 app = Flask(__name__)
 CORS(
@@ -52,7 +43,6 @@ def create_task() -> Any:
         return jsonify({"error": "没有接收到任何视频文件。"}), 400
 
     task = store.create_task(total_videos=len(upload_files))
-    task_directory = TASK_OUTPUT_ROOT / task.task_id
     upload_directory = UPLOAD_ROOT / task.task_id
 
     task.task_logs.append(make_log("info", f"Task {task.task_id} created."))
@@ -63,12 +53,8 @@ def create_task() -> Any:
 
     task.task_logs.append(make_log("info", f"Saved {len(saved_video_paths)} video files."))
 
-    processing_thread = threading.Thread(
-        target=process_task_videos,
-        args=(task.task_id, saved_video_paths, task_directory),
-        daemon=True,
-    )
-    processing_thread.start()
+    task_directory = TASK_OUTPUT_ROOT / task.task_id
+    start_processing_task(store, task.task_id, saved_video_paths, task_directory)
 
     return jsonify(
         {
@@ -81,120 +67,11 @@ def create_task() -> Any:
 
 
 def process_task_videos(task_id: str, saved_video_paths, task_directory: Path) -> None:
-    task = store.get_task(task_id)
-    if not task:
-        return
-
-    task_directory.mkdir(parents=True, exist_ok=True)
-    task.task_logs.append(make_log("info", f"Task {task_id} processing started."))
-
-    for video_path in saved_video_paths:
-        video_name = video_path.name
-        task.task_logs.append(make_log("info", f"Start processing video: {video_name}", video_name=video_name))
-        task.video_results.append(
-            {
-                "video_name": video_name,
-                "status": "processing",
-                "error_message": None,
-                "original_scenes": [],
-                "merged_segments": [],
-                "chosen_grouping_plan": [],
-                "summary": {},
-                "logs": [],
-                "analysis_status": "processing",
-            }
-        )
-        video_result_index = len(task.video_results) - 1
-
-        task.event_queue.put(
-            {
-                "event": "video_processing_started",
-                "data": {
-                    "taskId": task.task_id,
-                    "videoIndex": video_result_index,
-                    "videoName": video_name,
-                    "taskStatus": task.status,
-                    "videoResult": deepcopy(task.video_results[video_result_index]),
-                    "taskLogs": task.task_logs,
-                },
-            }
-        )
-
-        def handle_segments_ready(merged_segments):
-            task.video_results[video_result_index]["merged_segments"] = deepcopy(merged_segments)
-            task.event_queue.put(
-                {
-                    "event": "segments_ready",
-                    "data": {
-                        "taskId": task.task_id,
-                        "videoIndex": video_result_index,
-                        "videoName": video_name,
-                        "mergedSegments": deepcopy(merged_segments),
-                        "taskStatus": task.status,
-                        "taskLogs": task.task_logs,
-                    },
-                }
-            )
-
-        def handle_segment_analysis(segment_index, segment_payload):
-            task.video_results[video_result_index]["merged_segments"][segment_index] = deepcopy(segment_payload)
-            task.event_queue.put(
-                {
-                    "event": "segment_analysis",
-                    "data": {
-                        "taskId": task.task_id,
-                        "videoIndex": video_result_index,
-                        "videoName": video_name,
-                        "segmentIndex": segment_index,
-                        "segment": deepcopy(segment_payload),
-                        "taskStatus": task.status,
-                        "taskLogs": task.task_logs,
-                    },
-                }
-            )
-
-        result = process_single_video(
-            source_video_path=video_path,
-            task_root_directory=task_directory,
-            base_public_url=BASE_PUBLIC_URL,
-            video_name=video_name,
-            task_log_sink=task.task_logs,
-            on_segments_ready=handle_segments_ready,
-            on_segment_analysis=handle_segment_analysis,
-        )
-
-        result_payload = asdict(result)
-        task.video_results[video_result_index] = result_payload
-        task.completed_videos += 1
-        task.status = "completed" if task.completed_videos == task.total_videos else "processing"
-
-        event_payload: Dict[str, Any] = {
-            "taskId": task.task_id,
-            "videoName": result.video_name,
-            "videoStatus": result.status,
-            "videoResult": result_payload,
-            "videoLogs": result.logs,
-            "completedVideos": task.completed_videos,
-            "totalVideos": task.total_videos,
-            "taskStatus": task.status,
-            "taskLogs": task.task_logs,
-        }
-        task.event_queue.put({"event": "video_result", "data": event_payload})
-
-    task.task_logs.append(make_log("success", f"Task {task_id} completed."))
-    task.event_queue.put(
-        {
-            "event": "task_completed",
-            "data": {
-                "taskId": task.task_id,
-                "taskStatus": task.status,
-                "completedVideos": task.completed_videos,
-                "totalVideos": task.total_videos,
-                "videoResults": task.video_results,
-                "taskLogs": task.task_logs,
-            },
-        }
-    )
+    """
+    Legacy shim retained temporarily so existing imports or references do not break.
+    The active processing implementation now lives in `task_runtime.py`.
+    """
+    start_processing_task(store, task_id, saved_video_paths, task_directory)
 
 
 @app.get("/api/tasks/<task_id>/stream")
@@ -226,6 +103,49 @@ def stream_task(task_id: str) -> Any:
 @app.get("/media/<path:relative_path>")
 def serve_media(relative_path: str) -> Any:
     return send_from_directory(DATA_ROOT, relative_path)
+
+
+@app.post("/api/tasks/<task_id>/fission/current-video")
+def generate_current_video_fissions(task_id: str) -> Any:
+    task = store.get_task(task_id)
+    if not task:
+        return jsonify({"error": "未找到对应任务。"}), 404
+
+    payload = request.get_json(silent=True) or {}
+    video_index = payload.get("videoIndex")
+    segments = payload.get("segments") or []
+    if video_index is None or not isinstance(segments, list):
+        return jsonify({"error": "缺少当前视频裂变参数。"}), 400
+
+    run_fission_generation(store, task_id, [{"videoIndex": int(video_index), "segments": segments}])
+    return jsonify(
+        {
+            "message": "当前视频裂变任务已完成。",
+            "videoResults": task.video_results,
+            "taskLogs": task.task_logs,
+        }
+    )
+
+
+@app.post("/api/tasks/<task_id>/fission/all-videos")
+def generate_all_video_fissions(task_id: str) -> Any:
+    task = store.get_task(task_id)
+    if not task:
+        return jsonify({"error": "未找到对应任务。"}), 404
+
+    payload = request.get_json(silent=True) or {}
+    videos = payload.get("videos") or []
+    if not isinstance(videos, list) or not videos:
+        return jsonify({"error": "缺少全部视频裂变参数。"}), 400
+
+    run_fission_generation(store, task_id, videos)
+    return jsonify(
+        {
+            "message": "全部视频裂变任务已完成。",
+            "videoResults": task.video_results,
+            "taskLogs": task.task_logs,
+        }
+    )
 
 
 @app.delete("/api/tasks/<task_id>")

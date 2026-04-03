@@ -354,6 +354,42 @@ body {
   gap: 16px;
 }
 
+.prompt-panel-topbar {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 220px 260px;
+  gap: 18px;
+  align-items: start;
+}
+
+.prompt-panel-copy {
+  min-width: 0;
+}
+
+.fission-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.fission-count-input {
+  width: 100%;
+  height: 44px;
+  border: 1px solid #cbd5e1;
+  border-radius: 12px;
+  padding: 0 14px;
+  font: inherit;
+  background: #fff;
+  color: #0f172a;
+}
+
+.fission-action-button {
+  width: 100%;
+}
+
+.prompt-action-error {
+  margin-top: 12px;
+}
+
 .prompt-meta {
   min-width: 220px;
   padding: 14px;
@@ -661,6 +697,10 @@ body {
 
   .prompt-panel-header {
     flex-direction: column;
+  }
+
+  .prompt-panel-topbar {
+    grid-template-columns: 1fr;
   }
 
   .prompt-addon-toolbar,

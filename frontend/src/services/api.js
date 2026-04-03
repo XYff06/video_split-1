@@ -18,6 +18,16 @@ export async function createProcessingTask(videoFiles) {
   return response.data
 }
 
+export async function generateCurrentVideoFissions(taskId, payload) {
+  const response = await backendClient.post(`/api/tasks/${taskId}/fission/current-video`, payload)
+  return response.data
+}
+
+export async function generateAllVideoFissions(taskId, payload) {
+  const response = await backendClient.post(`/api/tasks/${taskId}/fission/all-videos`, payload)
+  return response.data
+}
+
 export function openTaskStream(taskId, handlers) {
   const eventSource = new EventSource(`http://127.0.0.1:5000/api/tasks/${taskId}/stream`)
 

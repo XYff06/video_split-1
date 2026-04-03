@@ -30,9 +30,14 @@
       />
     </main>
 
-    <PromptAddonGrid
+    <PromptFissionPanel
       :current-video-result="currentVideoResult"
       :current-segment="currentSegment"
+      :is-generating-current-video="isGeneratingCurrentVideo"
+      :is-generating-all-videos="isGeneratingAllVideos"
+      :action-error-message="fissionErrorMessage"
+      @generate-current-video="generateCurrentVideo"
+      @generate-all-videos="generateAllVideos"
     />
   </div>
 </template>
@@ -41,8 +46,18 @@
 import { computed, onBeforeUnmount, ref } from 'vue'
 import UploadPanel from './components/UploadPanel.vue'
 import ResultPanel from './components/ResultPanel.vue'
-import PromptAddonGrid from './components/PromptAddonGrid.vue'
-import { createProcessingTask, openTaskStream } from './services/api'
+import PromptFissionPanel from './components/PromptFissionPanel.vue'
+import {
+  createProcessingTask,
+  generateAllVideoFissions,
+  generateCurrentVideoFissions,
+  openTaskStream
+} from './services/api'
+import {
+  composeSegmentGenerationPrompt,
+  ensureSegmentLocalState,
+  mergeVideoResultsWithLocalState
+} from './utils/segmentPrompt'
 
 const uploadFileQueue = ref([])
 const taskId = ref('')
@@ -55,6 +70,9 @@ const selectedSegmentIndex = ref(0)
 const uploadErrorMessage = ref('')
 const taskLogs = ref([])
 const currentVideoPage = ref(0)
+const isGeneratingCurrentVideo = ref(false)
+const isGeneratingAllVideos = ref(false)
+const fissionErrorMessage = ref('')
 
 const allowedVideoExtensions = ['mp4', 'mov', 'mkv', 'avi', 'webm', 'm4v', 'wmv']
 
@@ -162,7 +180,7 @@ function connectSseStream(newTaskId) {
       totalVideos.value = snapshot.totalVideos
       taskLogs.value = snapshot.taskLogs || []
       if (Array.isArray(snapshot.videoResults) && snapshot.videoResults.length) {
-        videoResults.value = snapshot.videoResults
+        videoResults.value = mergeVideoResultsWithLocalState(snapshot.videoResults, videoResults.value)
         ensureSelectedVideoExists()
       }
     },
@@ -170,6 +188,7 @@ function connectSseStream(newTaskId) {
       taskStatus.value = payload.taskStatus
       taskLogs.value = payload.taskLogs || []
       videoResults.value[payload.videoIndex] = payload.videoResult
+      hydrateVideoResults()
       ensureSelectedVideoExists()
     },
     onSegmentsReady(payload) {
@@ -181,6 +200,7 @@ function connectSseStream(newTaskId) {
 
       targetVideo.merged_segments = payload.mergedSegments
       targetVideo.status = 'processing'
+      hydrateVideoResults()
     },
     onSegmentAnalysis(payload) {
       taskStatus.value = payload.taskStatus
@@ -190,11 +210,17 @@ function connectSseStream(newTaskId) {
       if (!targetVideo || !Array.isArray(targetVideo.merged_segments)) return
 
       const previousSegment = targetVideo.merged_segments[payload.segmentIndex]
+      const nextEditedPrompt = payload.segment.analysis?.prompt || payload.segment.edited_prompt || ''
       targetVideo.merged_segments[payload.segmentIndex] = {
         ...payload.segment,
-        edited_prompt: previousSegment?.edited_prompt,
-        prompt_addons: previousSegment?.prompt_addons
+        edited_prompt:
+          typeof previousSegment?.edited_prompt === 'string' && previousSegment.edited_prompt.trim()
+            ? previousSegment.edited_prompt
+            : nextEditedPrompt,
+        prompt_addons: previousSegment?.prompt_addons,
+        fission_count: previousSegment?.fission_count ?? payload.segment.fission_count ?? 1
       }
+      ensureSegmentLocalState(targetVideo.merged_segments[payload.segmentIndex])
     },
     onVideoResult(payload) {
       completedVideos.value = payload.completedVideos
@@ -203,19 +229,8 @@ function connectSseStream(newTaskId) {
       taskLogs.value = payload.taskLogs || []
       const targetIndex = payload.completedVideos - 1
       const previousVideoResult = videoResults.value[targetIndex]
-      if (previousVideoResult?.merged_segments?.length && payload.videoResult?.merged_segments?.length) {
-        payload.videoResult.merged_segments = payload.videoResult.merged_segments.map((segment, index) => {
-          const previousSegment = previousVideoResult.merged_segments[index]
-          if (!previousSegment) return segment
-
-          return {
-            ...segment,
-            edited_prompt: previousSegment.edited_prompt,
-            prompt_addons: previousSegment.prompt_addons
-          }
-        })
-      }
-      videoResults.value[targetIndex] = payload.videoResult
+      videoResults.value[targetIndex] = mergeVideoResultsWithLocalState([payload.videoResult], [previousVideoResult])[0]
+      videoResults.value[targetIndex]?.merged_segments?.forEach((segment) => ensureSegmentLocalState(segment))
 
       if (selectedVideoIndex.value === -1) {
         selectedVideoIndex.value = 0
@@ -245,6 +260,73 @@ function ensureSelectedVideoExists() {
   if (selectedVideoIndex.value < 0 || selectedVideoIndex.value >= videoResults.value.length) {
     selectedVideoIndex.value = 0
     selectedSegmentIndex.value = 0
+  }
+}
+
+function hydrateVideoResults() {
+  videoResults.value.forEach((videoResult) => {
+    videoResult?.merged_segments?.forEach((segment) => {
+      ensureSegmentLocalState(segment)
+    })
+  })
+}
+
+function buildVideoGenerationPayload(videoResult, videoIndex) {
+  const segments = (videoResult?.merged_segments || []).map((segment, segmentIndex) => {
+    ensureSegmentLocalState(segment)
+    return {
+      segmentIndex,
+      fissionCount: segment.fission_count,
+      generationPrompt: composeSegmentGenerationPrompt(segment)
+    }
+  })
+
+  return { videoIndex, segments }
+}
+
+async function generateCurrentVideo() {
+  if (!taskId.value || !currentVideoResult.value) return
+
+  fissionErrorMessage.value = ''
+  isGeneratingCurrentVideo.value = true
+
+  try {
+    const payload = buildVideoGenerationPayload(currentVideoResult.value, selectedVideoIndex.value)
+    const response = await generateCurrentVideoFissions(taskId.value, payload)
+    videoResults.value = mergeVideoResultsWithLocalState(response.videoResults, videoResults.value)
+    taskLogs.value = response.taskLogs || taskLogs.value
+  } catch (error) {
+    fissionErrorMessage.value =
+      error?.response?.data?.error ||
+      error?.response?.data?.message ||
+      error?.message ||
+      '当前视频裂变失败，请稍后重试。'
+  } finally {
+    isGeneratingCurrentVideo.value = false
+  }
+}
+
+async function generateAllVideos() {
+  if (!taskId.value || !videoResults.value.length) return
+
+  fissionErrorMessage.value = ''
+  isGeneratingAllVideos.value = true
+
+  try {
+    const payload = {
+      videos: videoResults.value.map((videoResult, videoIndex) => buildVideoGenerationPayload(videoResult, videoIndex))
+    }
+    const response = await generateAllVideoFissions(taskId.value, payload)
+    videoResults.value = mergeVideoResultsWithLocalState(response.videoResults, videoResults.value)
+    taskLogs.value = response.taskLogs || taskLogs.value
+  } catch (error) {
+    fissionErrorMessage.value =
+      error?.response?.data?.error ||
+      error?.response?.data?.message ||
+      error?.message ||
+      '全部视频裂变失败，请稍后重试。'
+  } finally {
+    isGeneratingAllVideos.value = false
   }
 }
 

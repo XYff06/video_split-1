@@ -12,13 +12,9 @@ from .media_utils import build_media_url
 load_dotenv()
 
 WAN_BASE_URL = os.getenv("DASHSCOPE_BASE_HTTP_API_URL", "https://dashscope.aliyuncs.com/api/v1")
-WAN_MODEL = os.getenv("WAN_MODEL", "wan2.6-t2v")
+WAN_MODEL = os.getenv("WAN_MODEL")
 WAN_SIZE = os.getenv("WAN_SIZE", "1280*720")
 WAN_DURATION = int(os.getenv("WAN_DURATION", "5"))
-WAN_PROMPT_EXTEND = os.getenv("WAN_PROMPT_EXTEND", "true").lower() == "true"
-WAN_WATERMARK = os.getenv("WAN_WATERMARK", "false").lower() == "true"
-WAN_SHOT_TYPE = os.getenv("WAN_SHOT_TYPE", "single")
-WAN_NEGATIVE_PROMPT = os.getenv("WAN_NEGATIVE_PROMPT")
 WAN_REQUEST_TIMEOUT = int(os.getenv("WAN_REQUEST_TIMEOUT", "120"))
 WAN_POLL_INTERVAL_SECONDS = int(os.getenv("WAN_POLL_INTERVAL_SECONDS", "15"))
 WAN_MAX_WAIT_SECONDS = int(os.getenv("WAN_MAX_WAIT_SECONDS", "1800"))
@@ -47,11 +43,7 @@ class WanTextToVideoClient:
         model: str = WAN_MODEL,
         size: str = WAN_SIZE,
         duration: int = WAN_DURATION,
-        prompt_extend: bool = WAN_PROMPT_EXTEND,
-        watermark: bool = WAN_WATERMARK,
-        negative_prompt: str | None = WAN_NEGATIVE_PROMPT,
         seed: int | None = None,
-        shot_type: str | None = WAN_SHOT_TYPE,
     ) -> dict:
         if not prompt or not prompt.strip():
             raise ValueError("prompt 不能为空")
@@ -62,17 +54,8 @@ class WanTextToVideoClient:
             "parameters": {
                 "size": size,
                 "duration": duration,
-                "prompt_extend": prompt_extend,
-                "watermark": watermark,
             },
         }
-        if negative_prompt:
-            request_body["input"]["negative_prompt"] = negative_prompt
-        if seed is not None:
-            request_body["parameters"]["seed"] = seed
-        if shot_type:
-            request_body["parameters"]["shot_type"] = shot_type
-
         response = requests.post(
             f"{self.base_url}/services/aigc/video-generation/video-synthesis",
             headers=self._build_headers(enable_async=True),

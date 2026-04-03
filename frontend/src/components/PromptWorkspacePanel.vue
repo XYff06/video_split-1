@@ -8,57 +8,50 @@
         </p>
       </div>
 
-      <div class="fission-controls" v-if="currentVideoResult && currentSegment">
-        <label class="prompt-label" for="fission-count">裂变视频数量</label>
-        <input
-          id="fission-count"
-          class="fission-count-input"
-          type="number"
-          min="0"
-          max="10"
-          :value="fissionCount"
-          @input="handleFissionCountInput"
-        />
-        <button
-          class="primary-button fission-action-button"
-          :disabled="disableCurrentVideoButton"
-          @click="$emit('generate-current-video')"
-        >
-          {{ isGeneratingCurrentVideo ? '当前视频裂变中...' : '当前视频裂变' }}
-        </button>
-        <button
-          class="ghost-button fission-action-button"
-          :disabled="disableAllVideosButton"
-          @click="$emit('generate-all-videos')"
-        >
-          {{ isGeneratingAllVideos ? '全部视频裂变中...' : '全部视频裂变' }}
-        </button>
+      <div v-if="currentVideoResult && currentSegment" class="prompt-meta">
+        <p>视频：{{ currentVideoResult.video_name }}</p>
+        <p>片段：{{ currentSegment.group_index }} / {{ currentVideoResult.merged_segments.length }}</p>
+        <p>状态：{{ analysisStatusText }}</p>
       </div>
+    </div>
 
-      <div class="size-controls">
-        <div class="size-control" v-if="currentVideoResult">
-          <label class="prompt-label" for="current-video-size">当前视频 Size</label>
-          <p class="hint-text">{{ isCurrentVideoFollowingGlobal ? '当前视频跟随全局 Size' : '当前视频使用独立 Size' }}</p>
-          <select
-            id="current-video-size"
-            class="size-select"
-            :value="currentVideoSize"
-            @change="$emit('change-current-video-size', $event.target.value)"
-          >
-            <option v-for="option in sizeOptions" :key="option" :value="option">{{ option }}</option>
-          </select>
+    <div class="prompt-control-board">
+      <div class="prompt-control-grid" v-if="currentVideoResult && currentSegment">
+        <div class="prompt-control-item prompt-control-row">
+          <label class="prompt-control-text" for="fission-count">裂变视频数量</label>
+          <input
+            id="fission-count"
+            class="fission-count-input"
+            type="number"
+            min="0"
+            max="10"
+            :value="fissionCount"
+            @input="handleFissionCountInput"
+          />
+        </div>
+
+        <div class="prompt-control-item">
           <button
-            class="ghost-button"
-            type="button"
-            :disabled="isCurrentVideoFollowingGlobal"
-            @click="$emit('reset-current-video-size')"
+            class="primary-button fission-action-button"
+            :disabled="disableCurrentVideoButton"
+            @click="$emit('generate-current-video')"
           >
-            重置为跟随全局
+            {{ isGeneratingCurrentVideo ? '当前视频裂变中...' : '当前视频裂变' }}
           </button>
         </div>
 
-        <div class="size-control">
-          <label class="prompt-label" for="global-size">全局 Size</label>
+        <div class="prompt-control-item">
+          <button
+            class="ghost-button fission-action-button"
+            :disabled="disableAllVideosButton"
+            @click="$emit('generate-all-videos')"
+          >
+            {{ isGeneratingAllVideos ? '全部视频裂变中...' : '全部视频裂变' }}
+          </button>
+        </div>
+
+        <div class="prompt-control-item prompt-control-row">
+          <label class="prompt-control-text" for="global-size">全局 Size</label>
           <select
             id="global-size"
             class="size-select"
@@ -68,12 +61,62 @@
             <option v-for="option in sizeOptions" :key="option" :value="option">{{ option }}</option>
           </select>
         </div>
+
+        <div class="prompt-control-item prompt-control-row">
+          <label class="prompt-control-text" for="current-video-size">当前视频 Size</label>
+          <select
+            id="current-video-size"
+            class="size-select"
+            :value="currentVideoSize"
+            @change="$emit('change-current-video-size', $event.target.value)"
+          >
+            <option v-for="option in sizeOptions" :key="option" :value="option">{{ option }}</option>
+          </select>
+        </div>
+
+        <div class="prompt-control-item">
+          <button
+            class="ghost-button fission-action-button"
+            type="button"
+            :disabled="isCurrentVideoFollowingGlobal"
+            @click="$emit('reset-current-video-size')"
+          >
+            重置为跟随全局
+          </button>
+        </div>
       </div>
 
-      <div v-if="currentVideoResult && currentSegment" class="prompt-meta">
-        <p>视频：{{ currentVideoResult.video_name }}</p>
-        <p>片段：{{ currentSegment.group_index }} / {{ currentVideoResult.merged_segments.length }}</p>
-        <p>状态：{{ analysisStatusText }}</p>
+      <div v-else class="prompt-control-grid prompt-control-grid-empty">
+        <div class="prompt-control-item prompt-control-row">
+          <span class="prompt-control-text">裂变视频数量</span>
+          <input class="fission-count-input" type="number" value="1" disabled />
+        </div>
+
+        <div class="prompt-control-item">
+          <button class="primary-button fission-action-button" disabled>当前视频裂变</button>
+        </div>
+
+        <div class="prompt-control-item">
+          <button class="ghost-button fission-action-button" disabled>全部视频裂变</button>
+        </div>
+
+        <div class="prompt-control-item prompt-control-row">
+          <span class="prompt-control-text">全局 Size</span>
+          <select class="size-select" disabled>
+            <option>{{ globalSize }}</option>
+          </select>
+        </div>
+
+        <div class="prompt-control-item prompt-control-row">
+          <span class="prompt-control-text">当前视频 Size</span>
+          <select class="size-select" disabled>
+            <option>{{ globalSize }}</option>
+          </select>
+        </div>
+
+        <div class="prompt-control-item">
+          <button class="ghost-button fission-action-button" disabled>重置为跟随全局</button>
+        </div>
       </div>
     </div>
 

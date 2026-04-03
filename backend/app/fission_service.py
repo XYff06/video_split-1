@@ -21,11 +21,7 @@ load_dotenv()
 
 # 以下参数全部从环境变量读取，方便调模型或部署时统一修改。
 WAN_BASE_URL = os.getenv("DASHSCOPE_BASE_HTTP_API_URL", "https://dashscope.aliyuncs.com/api/v1")
-WAN_MODEL = os.getenv("WAN_MODEL", "wan2.6-t2v")
-WAN_SIZE = os.getenv("WAN_SIZE", "1920*1080")
-WAN_PROMPT_EXTEND = os.getenv("WAN_PROMPT_EXTEND", "true").lower() == "true"
-WAN_WATERMARK = os.getenv("WAN_WATERMARK", "false").lower() == "true"
-WAN_NEGATIVE_PROMPT = os.getenv("WAN_NEGATIVE_PROMPT")
+WAN_MODEL = os.getenv("WAN_MODEL")
 WAN_REQUEST_TIMEOUT = int(os.getenv("WAN_REQUEST_TIMEOUT", "120"))
 WAN_POLL_INTERVAL_SECONDS = int(os.getenv("WAN_POLL_INTERVAL_SECONDS", "15"))
 WAN_MAX_WAIT_SECONDS = int(os.getenv("WAN_MAX_WAIT_SECONDS", "1800"))
@@ -61,11 +57,8 @@ class WanTextToVideoClient:
         *,
         prompt: str,
         model: str = WAN_MODEL,
-        size: str = WAN_SIZE,
+        size: str,
         duration: int,
-        prompt_extend: bool = WAN_PROMPT_EXTEND,
-        watermark: bool = WAN_WATERMARK,
-        negative_prompt: str | None = WAN_NEGATIVE_PROMPT,
         shot_type: str = "multi",
     ) -> dict:
         """创建一个异步文生视频任务。"""
@@ -80,13 +73,9 @@ class WanTextToVideoClient:
             "parameters": {
                 "size": size,
                 "duration": duration,
-                "prompt_extend": prompt_extend,
-                "watermark": watermark,
                 "shot_type": shot_type,
             },
         }
-        if negative_prompt:
-            request_body["input"]["negative_prompt"] = negative_prompt
 
         response = requests.post(
             f"{self.base_url}/services/aigc/video-generation/video-synthesis",

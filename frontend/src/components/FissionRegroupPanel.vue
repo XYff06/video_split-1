@@ -7,7 +7,6 @@
       </div>
 
       <label class="regroup-header-picker" v-if="videoResults.length">
-        <span>选择视频</span>
         <select v-model.number="selectedVideoIndex">
           <option v-for="(video, index) in videoResults" :key="`${video.video_name}-${index}`" :value="index">
             {{ video.video_name }}
@@ -22,7 +21,7 @@
       <section class="regroup-card">
         <h3>裂变视频预览</h3>
 
-        <div class="regroup-filters">
+        <div class="regroup-filters regroup-filters-fission">
           <label>
             <span>选择片段</span>
             <select v-model.number="selectedSegmentIndex">
@@ -94,8 +93,8 @@
       <section class="regroup-card">
         <h3>重组视频预览</h3>
 
-        <div class="regroup-filters regroup-filters-actions">
-          <label>
+        <div class="regroup-toolbar">
+          <label class="regroup-toolbar-picker">
             <span>选择要预览的重组视频</span>
             <select v-model.number="selectedRegroupIndex">
               <option
@@ -108,34 +107,36 @@
             </select>
           </label>
 
-          <button
-            class="ghost-button"
-            :disabled="!currentRegroupList.length || isWorking"
-            @click="$emit('download-current-video', selectedVideoIndex)"
-          >
-            下载当前视频
-          </button>
-          <button
-            class="ghost-button"
-            :disabled="!currentVideo || isWorking"
-            @click="$emit('regroup-video', selectedVideoIndex)"
-          >
-            重组当前视频
-          </button>
-          <button
-            class="ghost-button"
-            :disabled="!hasAnyRegroupedVideo || isWorking"
-            @click="$emit('download-all-videos')"
-          >
-            下载全部视频
-          </button>
-          <button
-            class="primary-button"
-            :disabled="!videoResults.length || isWorking"
-            @click="$emit('regroup-all-videos')"
-          >
-            重组全部视频
-          </button>
+          <div class="regroup-toolbar-actions">
+            <button
+              class="ghost-button"
+              :disabled="!currentRegroupList.length || isWorking"
+              @click="$emit('download-current-video', selectedVideoIndex)"
+            >
+              下载当前视频
+            </button>
+            <button
+              class="ghost-button"
+              :disabled="!hasAnyRegroupedVideo || isWorking"
+              @click="$emit('download-all-videos')"
+            >
+              下载全部视频
+            </button>
+            <button
+              class="ghost-button regroup-action-strong"
+              :disabled="!currentVideo || isWorking"
+              @click="$emit('regroup-video', selectedVideoIndex)"
+            >
+              重组当前视频
+            </button>
+            <button
+              class="primary-button"
+              :disabled="!videoResults.length || isWorking"
+              @click="$emit('regroup-all-videos')"
+            >
+              重组全部视频
+            </button>
+          </div>
         </div>
 
         <div class="preview-card regroup-preview-card">

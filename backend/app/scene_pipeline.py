@@ -1,3 +1,12 @@
+"""单视频处理流水线。
+
+这里封装的是“一个视频从原始文件到可用片段结果”的完整过程：
+1. 场景检测并切出原始小片段。
+2. 搜索满足时长约束的连续分组方案。
+3. 选择一套方案并把多个小片段合并成最终片段。
+4. 可选地调用多模态模型为每个片段生成提示词分析。
+"""
+
 import random
 import subprocess
 from pathlib import Path
@@ -22,9 +31,12 @@ def detect_and_split_original_scenes(
     video_name: str,
     append_log,
 ) -> list[dict]:
+    """执行场景检测，并把原视频切成最细粒度的原始片段。"""
+
     append_log("info", f"Starting scene detection for video: {video_name}")
     data_root = scene_output_directory.parents[3]
 
+    # 这里使用 PySceneDetect 根据画面变化自动识别场景边界。
     video_stream = open_video(str(source_video_path))
     scene_manager = SceneManager()
     scene_manager.add_detector(ContentDetector())
@@ -37,6 +49,7 @@ def detect_and_split_original_scenes(
     scene_output_directory.mkdir(parents=True, exist_ok=True)
     append_log("info", f"Detected {len(detected_scenes)} scenes. Starting built-in split operation.")
 
+    # 识别出场景后，再交给 PySceneDetect 内置的 ffmpeg splitter 真正导出文件。
     split_video_ffmpeg(
         input_video_path=str(source_video_path),
         scene_list=detected_scenes,
@@ -58,6 +71,7 @@ def detect_and_split_original_scenes(
         start_seconds = start_timecode.get_seconds()
         end_seconds = end_timecode.get_seconds()
         duration_seconds = end_seconds - start_seconds
+        # 每个原始场景都保留时间范围、磁盘路径和可访问 URL，后续分组和预览都要用到。
         original_scenes.append(
             {
                 "scene_index": index,
@@ -74,6 +88,8 @@ def detect_and_split_original_scenes(
 
 
 def search_valid_continuous_groupings(original_scenes: list[dict], append_log):
+    """搜索所有满足时长要求的连续分组方案。"""
+
     append_log("info", "DFS grouping search started.")
     durations = [scene["duration_seconds"] for scene in original_scenes]
 
@@ -86,6 +102,8 @@ def search_valid_continuous_groupings(original_scenes: list[dict], append_log):
     if min_groups > max_groups:
         raise RuntimeError("Total duration cannot be partitioned into contiguous groups of 6-14 seconds.")
 
+    # `suffix_sum` 用来快速估算“从当前位置到结尾还剩多少总时长”，
+    # 这样 DFS 可以更早剪枝，减少无意义搜索。
     n = len(durations)
     suffix_sum = [0.0] * (n + 1)
     for i in range(n - 1, -1, -1):
@@ -95,6 +113,7 @@ def search_valid_continuous_groupings(original_scenes: list[dict], append_log):
     hit_limit = False
 
     def dfs(start_index: int, plan: list[list[int]]) -> None:
+        # DFS 的含义是：从第 `start_index` 个原始场景开始，递归尝试后续所有合法分组。
         nonlocal hit_limit
         if hit_limit:
             return
@@ -140,6 +159,8 @@ def search_valid_continuous_groupings(original_scenes: list[dict], append_log):
 
 
 def choose_final_grouping_plan(all_grouping_plans: list[list[list[int]]], append_log) -> list[list[int]]:
+    """从所有合法分组方案中随机选出一套最终方案。"""
+
     shuffled_plans = all_grouping_plans[:]
     random.shuffle(shuffled_plans)
     chosen_plan = random.choice(shuffled_plans)
@@ -154,6 +175,8 @@ def merge_grouped_scene_files(
     base_public_url: str,
     append_log,
 ) -> list[dict]:
+    """把选中的连续场景组合并成最终可用片段。"""
+
     merged_output_directory.mkdir(parents=True, exist_ok=True)
     merged_segments = []
     data_root = merged_output_directory.parents[3]
@@ -163,11 +186,13 @@ def merge_grouped_scene_files(
         concat_file_path = merged_output_directory / f"group_{group_index:03d}_concat.txt"
         merged_file_path = merged_output_directory / f"group_{group_index:03d}.mp4"
 
+        # 先写出 ffmpeg concat 清单文件，告诉 ffmpeg 应该按什么顺序拼接源片段。
         with concat_file_path.open("w", encoding="utf-8") as concat_file:
             for scene in selected_scenes:
                 safe_path = scene["file_path"].replace("'", "'\\''")
                 concat_file.write(f"file '{safe_path}'\n")
 
+        # 使用 `-c copy` 做无重新编码拼接，速度更快，也尽量避免画质损失。
         ffmpeg_command = [
             "ffmpeg",
             "-y",
@@ -196,6 +221,7 @@ def merge_grouped_scene_files(
         start_seconds = selected_scenes[0]["start_seconds"]
         end_seconds = selected_scenes[-1]["end_seconds"]
         duration_seconds = end_seconds - start_seconds
+        # 每个合并片段除了导出文件路径外，还会额外记录分析和生成所需的运行时字段。
         merged_segments.append(
             {
                 "group_index": group_index,
@@ -230,6 +256,8 @@ def process_single_video(
     on_segments_ready=None,
     on_segment_analysis=None,
 ) -> VideoProcessResult:
+    """执行单个视频的完整处理流水线。"""
+
     video_logs = []
 
     def append_video_log(level: str, message: str):
@@ -240,6 +268,7 @@ def process_single_video(
         task_log_sink.append(entry)
 
     try:
+        # 一个视频的所有中间产物都会放在当前任务目录下的独立子目录中。
         scene_directory = task_root_directory / "original_scenes" / source_video_path.stem
         merged_directory = task_root_directory / "merged_segments" / source_video_path.stem
 
@@ -262,10 +291,12 @@ def process_single_video(
         )
 
         if callable(on_segments_ready):
+            # 允许上层在“片段已经可预览”这个时间点提前通知前端。
             on_segments_ready(merged_segments)
 
         analysis_status = "completed"
         if not can_run_prompt_analysis():
+            # 没配好多模态分析能力时，不让整个视频处理失败，而是标记为跳过。
             analysis_status = "skipped"
             append_video_log("warning", "未配置 DashScope 视频理解能力，已跳过片段提示词生成。")
             for segment in merged_segments:
@@ -275,6 +306,7 @@ def process_single_video(
                     on_segment_analysis(segment["group_index"] - 1, segment)
         else:
             for segment_index, segment in enumerate(merged_segments):
+                # 每个片段分别分析，这样即使某一个失败，也不会拖垮整支视频。
                 try:
                     segment["analysis"] = analyze_segment_prompt(segment, append_video_log)
                     segment["analysis_status"] = "completed"
@@ -286,6 +318,7 @@ def process_single_video(
                 if callable(on_segment_analysis):
                     on_segment_analysis(segment_index, segment)
 
+        # 汇总信息主要给前端做统计展示，例如原始场景数、合并片段数、总时长等。
         summary = {
             "original_scene_count": len(original_scenes),
             "merged_segment_count": len(merged_segments),

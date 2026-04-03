@@ -28,8 +28,8 @@ export async function generateAllVideoFissions(taskId, payload) {
   return response.data
 }
 
-export async function updateVideoFissionSize(taskId, videoIndex, size) {
-  const response = await backendClient.post(`/api/tasks/${taskId}/videos/${videoIndex}/size`, { size })
+export async function updateVideoFissionSize(taskId, videoIndex, payload) {
+  const response = await backendClient.post(`/api/tasks/${taskId}/videos/${videoIndex}/size`, payload)
   return response.data
 }
 

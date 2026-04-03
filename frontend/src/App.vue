@@ -41,6 +41,7 @@
       @generate-all-videos="generateAllVideos"
       @change-current-video-size="changeCurrentVideoSize"
       @change-global-size="changeGlobalSize"
+      @reset-current-video-size="resetCurrentVideoSize"
     />
 
     <FissionRegroupPanel
@@ -310,6 +311,7 @@ function hydrateVideoResults() {
 }
 
 function buildVideoGenerationPayload(videoResult, videoIndex) {
+  const useGlobalSize = videoResult?.use_global_fission_size !== false
   const segments = (videoResult?.merged_segments || []).map((segment, segmentIndex) => {
     ensureSegmentLocalState(segment)
     return {
@@ -321,7 +323,7 @@ function buildVideoGenerationPayload(videoResult, videoIndex) {
 
   return {
     videoIndex,
-    videoSize: videoResult?.fission_size || globalFissionSize.value,
+    videoSize: useGlobalSize ? null : (videoResult?.fission_size || globalFissionSize.value),
     segments
   }
 }
@@ -377,9 +379,13 @@ async function changeCurrentVideoSize(size) {
   if (!taskId.value || selectedVideoIndex.value < 0 || !currentVideoResult.value) return
   variantActionError.value = ''
   currentVideoResult.value.fission_size = size
+  currentVideoResult.value.use_global_fission_size = false
 
   try {
-    const response = await updateVideoFissionSize(taskId.value, selectedVideoIndex.value, size)
+    const response = await updateVideoFissionSize(taskId.value, selectedVideoIndex.value, {
+      size,
+      useGlobal: false
+    })
     videoResults.value = mergeVideoResultsWithLocalState(response.videoResults, videoResults.value)
     taskLogs.value = response.taskLogs || taskLogs.value
   } catch (error) {
@@ -388,6 +394,28 @@ async function changeCurrentVideoSize(size) {
       error?.response?.data?.message ||
       error?.message ||
       '更新当前视频 size 失败。'
+  }
+}
+
+async function resetCurrentVideoSize() {
+  if (!taskId.value || selectedVideoIndex.value < 0 || !currentVideoResult.value) return
+  variantActionError.value = ''
+  currentVideoResult.value.fission_size = null
+  currentVideoResult.value.use_global_fission_size = true
+
+  try {
+    const response = await updateVideoFissionSize(taskId.value, selectedVideoIndex.value, {
+      size: null,
+      useGlobal: true
+    })
+    videoResults.value = mergeVideoResultsWithLocalState(response.videoResults, videoResults.value)
+    taskLogs.value = response.taskLogs || taskLogs.value
+  } catch (error) {
+    variantActionError.value =
+      error?.response?.data?.error ||
+      error?.response?.data?.message ||
+      error?.message ||
+      '重置当前视频为跟随全局 Size 失败。'
   }
 }
 

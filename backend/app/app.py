@@ -1,3 +1,11 @@
+"""Flask 应用入口。
+
+这个文件主要承担控制层职责：
+1. 创建 Flask 应用并配置跨域。
+2. 定义任务创建、SSE 订阅、媒体访问、裂变生成等接口。
+3. 把 HTTP 请求转交给 `task_runtime.py` 中的后台处理逻辑。
+"""
+
 import json
 import threading
 from copy import deepcopy
@@ -24,6 +32,7 @@ from .task_runtime import (
 
 
 app = Flask(__name__)
+# 允许本地前端开发服务器访问当前后端接口。
 CORS(
     app,
     resources={
@@ -37,16 +46,21 @@ CORS(
         }
     },
 )
+# 当前进程中的任务状态统一保存在这个内存仓库里。
 store = TaskStore()
 
 
 @app.get("/health")
 def health() -> Any:
+    """健康检查接口，用于确认服务是否正常启动。"""
+
     return jsonify({"status": "ok"})
 
 
 @app.post("/api/tasks")
 def create_task() -> Any:
+    """创建新任务并启动后台视频处理线程。"""
+
     upload_files = request.files.getlist("videos")
     if not upload_files:
         return jsonify({"error": "没有接收到任何视频文件。"}), 400
@@ -54,6 +68,7 @@ def create_task() -> Any:
     task = store.create_task(total_videos=len(upload_files))
     upload_directory = UPLOAD_ROOT / task.task_id
 
+    # 先记录任务创建日志，再保存上传文件，方便前端展示完整轨迹。
     task.task_logs.append(make_log("info", f"Task {task.task_id} created."))
     saved_video_paths = save_uploaded_files(upload_files, upload_directory)
 
@@ -63,6 +78,7 @@ def create_task() -> Any:
     task.task_logs.append(make_log("info", f"Saved {len(saved_video_paths)} video files."))
 
     task_directory = TASK_OUTPUT_ROOT / task.task_id
+    # 实际视频处理放到后台线程里做，避免当前请求阻塞太久。
     start_processing_task(store, task.task_id, saved_video_paths, task_directory)
 
     return jsonify(
@@ -77,19 +93,24 @@ def create_task() -> Any:
 
 def process_task_videos(task_id: str, saved_video_paths, task_directory: Path) -> None:
     """
-    Legacy shim retained temporarily so existing imports or references do not break.
-    The active processing implementation now lives in `task_runtime.py`.
+    兼容旧调用路径的过渡函数。
+
+    当前真正的视频处理实现已经迁移到 `task_runtime.py`，
+    这里保留包装函数是为了避免旧引用立即失效。
     """
     start_processing_task(store, task_id, saved_video_paths, task_directory)
 
 
 @app.get("/api/tasks/<task_id>/stream")
 def stream_task(task_id: str) -> Any:
+    """通过 SSE 持续推送任务进度和结果变化。"""
+
     task = store.get_task(task_id)
     if not task:
         return jsonify({"error": "未找到对应任务。"}), 404
 
     def event_generator():
+        # 首先推送一份完整快照，确保前端刷新后也能恢复任务上下文。
         initial_payload = {
             "taskId": task.task_id,
             "taskStatus": task.status,
@@ -101,9 +122,11 @@ def stream_task(task_id: str) -> Any:
         yield f"event: task_snapshot\ndata: {json.dumps(initial_payload)}\n\n"
 
         while True:
+            # 阻塞等待后台线程写入新事件，再把增量状态实时推送给前端。
             event = task.event_queue.get()
             yield f"event: {event['event']}\ndata: {json.dumps(event['data'])}\n\n"
             if event["event"] == "task_completed":
+                # 任务整体完成后结束当前 SSE 流。
                 break
 
     return Response(event_generator(), mimetype="text/event-stream")
@@ -111,11 +134,15 @@ def stream_task(task_id: str) -> Any:
 
 @app.get("/media/<path:relative_path>")
 def serve_media(relative_path: str) -> Any:
+    """提供 `backend/data` 目录下媒体文件的静态访问。"""
+
     return send_from_directory(DATA_ROOT, relative_path)
 
 
 @app.post("/api/tasks/<task_id>/fission/current-video")
 def generate_current_video_fissions(task_id: str) -> Any:
+    """只针对当前选中的某个视频执行裂变生成。"""
+
     task = store.get_task(task_id)
     if not task:
         return jsonify({"error": "未找到对应任务。"}), 404
@@ -127,6 +154,7 @@ def generate_current_video_fissions(task_id: str) -> Any:
     if video_index is None or not isinstance(segments, list):
         return jsonify({"error": "缺少当前视频裂变参数。"}), 400
 
+    # 复用批量裂变逻辑，只是这里把参数包装成“单视频列表”。
     run_fission_generation(store, task_id, [{"videoIndex": int(video_index), "segments": segments, "videoSize": video_size}])
     return jsonify(
         {
@@ -139,6 +167,8 @@ def generate_current_video_fissions(task_id: str) -> Any:
 
 @app.post("/api/tasks/<task_id>/fission/all-videos")
 def generate_all_video_fissions(task_id: str) -> Any:
+    """对任务中的多个视频批量执行裂变生成。"""
+
     task = store.get_task(task_id)
     if not task:
         return jsonify({"error": "未找到对应任务。"}), 404
@@ -150,6 +180,7 @@ def generate_all_video_fissions(task_id: str) -> Any:
         return jsonify({"error": "缺少全部视频裂变参数。"}), 400
 
     for video in videos:
+        # 某个视频没有单独指定尺寸时，自动继承全局尺寸设置。
         if global_size and not video.get("videoSize"):
             video["videoSize"] = global_size
 
@@ -165,13 +196,16 @@ def generate_all_video_fissions(task_id: str) -> Any:
 
 @app.post("/api/tasks/<task_id>/videos/<int:video_index>/size")
 def update_video_fission_size(task_id: str, video_index: int) -> Any:
+    """更新某个视频默认的裂变生成尺寸。"""
+
     task = store.get_task(task_id)
     if not task:
         return jsonify({"error": "Task not found."}), 404
 
     payload = request.get_json(silent=True) or {}
-    size = payload.get("size")
-    if not size:
+    use_global = bool(payload.get("useGlobal"))
+    size = None if use_global else payload.get("size")
+    if not use_global and not size:
         return jsonify({"error": "Missing size."}), 400
 
     video_result = update_video_generation_size(store, task_id, video_index, size)
@@ -180,6 +214,8 @@ def update_video_fission_size(task_id: str, video_index: int) -> Any:
 
 @app.post("/api/tasks/<task_id>/videos/<int:video_index>/segments/<int:segment_index>/variants")
 def add_fission_variant(task_id: str, video_index: int, segment_index: int) -> Any:
+    """给某个片段额外追加一个新的裂变变体。"""
+
     task = store.get_task(task_id)
     if not task:
         return jsonify({"error": "Task not found."}), 404
@@ -194,6 +230,8 @@ def add_fission_variant(task_id: str, video_index: int, segment_index: int) -> A
 
 @app.delete("/api/tasks/<task_id>/videos/<int:video_index>/segments/<int:segment_index>/variants/<int:variant_index>")
 def remove_fission_variant(task_id: str, video_index: int, segment_index: int, variant_index: int) -> Any:
+    """删除某个片段下指定序号的裂变变体。"""
+
     task = store.get_task(task_id)
     if not task:
         return jsonify({"error": "Task not found."}), 404
@@ -208,6 +246,8 @@ def remove_fission_variant(task_id: str, video_index: int, segment_index: int, v
 
 @app.post("/api/tasks/<task_id>/videos/<int:video_index>/segments/<int:segment_index>/variants/<int:variant_index>/redo")
 def redo_fission_variant(task_id: str, video_index: int, segment_index: int, variant_index: int) -> Any:
+    """重新生成某个片段的指定变体。"""
+
     task = store.get_task(task_id)
     if not task:
         return jsonify({"error": "Task not found."}), 404
@@ -222,6 +262,8 @@ def redo_fission_variant(task_id: str, video_index: int, segment_index: int, var
 
 @app.post("/api/tasks/<task_id>/videos/<int:video_index>/regroup")
 def regroup_single_video(task_id: str, video_index: int) -> Any:
+    """基于当前片段变体，重新导出该视频的整片重组结果。"""
+
     task = store.get_task(task_id)
     if not task:
         return jsonify({"error": "Task not found."}), 404
@@ -236,6 +278,8 @@ def regroup_single_video(task_id: str, video_index: int) -> Any:
 
 @app.delete("/api/tasks/<task_id>")
 def delete_task_artifacts(task_id: str) -> Any:
+    """删除某个任务在磁盘上的上传文件和处理产物。"""
+
     cleanup_directory(UPLOAD_ROOT / task_id)
     cleanup_directory(TASK_OUTPUT_ROOT / task_id)
     return jsonify({"message": "任务输出文件已删除。"})

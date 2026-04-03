@@ -1,4 +1,4 @@
-<template>
+﻿<template>
   <section class="panel prompt-panel">
     <div class="prompt-panel-topbar">
       <div class="prompt-panel-copy">
@@ -38,6 +38,7 @@
       <div class="size-controls">
         <div class="size-control" v-if="currentVideoResult">
           <label class="prompt-label" for="current-video-size">当前视频 Size</label>
+          <p class="hint-text">{{ isCurrentVideoFollowingGlobal ? '当前视频跟随全局 Size' : '当前视频使用独立 Size' }}</p>
           <select
             id="current-video-size"
             class="size-select"
@@ -46,6 +47,14 @@
           >
             <option v-for="option in sizeOptions" :key="option" :value="option">{{ option }}</option>
           </select>
+          <button
+            class="ghost-button"
+            type="button"
+            :disabled="isCurrentVideoFollowingGlobal"
+            @click="$emit('reset-current-video-size')"
+          >
+            重置为跟随全局
+          </button>
         </div>
 
         <div class="size-control">
@@ -172,7 +181,8 @@ defineEmits([
   'generate-current-video',
   'generate-all-videos',
   'change-current-video-size',
-  'change-global-size'
+  'change-global-size',
+  'reset-current-video-size'
 ])
 
 const isDeveloperMode = import.meta.env.DEV
@@ -205,6 +215,7 @@ const fissionCount = computed(() => {
   return segment.fission_count
 })
 
+const isCurrentVideoFollowingGlobal = computed(() => props.currentVideoResult?.use_global_fission_size !== false)
 const currentVideoSize = computed(() => props.currentVideoResult?.fission_size || props.globalSize)
 const isAddonLimitReached = computed(() => addonItems.value.length >= 5)
 

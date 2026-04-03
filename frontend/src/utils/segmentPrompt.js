@@ -61,9 +61,16 @@ export function mergeVideoResultsWithLocalState(nextVideoResults, previousVideoR
       return videoResult
     }
 
+    const useGlobalFissionSize = typeof videoResult.use_global_fission_size === 'boolean'
+      ? videoResult.use_global_fission_size
+      : (typeof previousVideoResult?.use_global_fission_size === 'boolean' ? previousVideoResult.use_global_fission_size : true)
+
     return {
       ...videoResult,
-      fission_size: previousVideoResult?.fission_size || videoResult.fission_size || '1920*1080',
+      fission_size: useGlobalFissionSize
+        ? null
+        : (videoResult.fission_size || previousVideoResult?.fission_size || '1920*1080'),
+      use_global_fission_size: useGlobalFissionSize,
       regrouped_videos: videoResult.regrouped_videos || [],
       merged_segments: videoResult.merged_segments.map((segment, segmentIndex) => {
         const previousSegment = previousVideoResult?.merged_segments?.[segmentIndex]

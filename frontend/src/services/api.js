@@ -57,6 +57,20 @@ export async function regroupVideo(taskId, videoIndex) {
   return response.data
 }
 
+export async function downloadCurrentVideoRegroups(taskId, videoIndex) {
+  const response = await backendClient.get(`/api/tasks/${taskId}/videos/${videoIndex}/regroup/download`, {
+    responseType: 'blob'
+  })
+  return response
+}
+
+export async function downloadAllVideoRegroups(taskId) {
+  const response = await backendClient.get(`/api/tasks/${taskId}/regroup/download`, {
+    responseType: 'blob'
+  })
+  return response
+}
+
 export function openTaskStream(taskId, handlers) {
   const eventSource = new EventSource(`http://127.0.0.1:5000/api/tasks/${taskId}/stream`)
 

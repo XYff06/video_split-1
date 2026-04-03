@@ -110,10 +110,24 @@
 
           <button
             class="ghost-button"
+            :disabled="!currentRegroupList.length || isWorking"
+            @click="$emit('download-current-video', selectedVideoIndex)"
+          >
+            下载当前视频
+          </button>
+          <button
+            class="ghost-button"
             :disabled="!currentVideo || isWorking"
             @click="$emit('regroup-video', selectedVideoIndex)"
           >
             重组当前视频
+          </button>
+          <button
+            class="ghost-button"
+            :disabled="!hasAnyRegroupedVideo || isWorking"
+            @click="$emit('download-all-videos')"
+          >
+            下载全部视频
           </button>
           <button
             class="primary-button"
@@ -153,7 +167,15 @@ const props = defineProps({
   errorMessage: { type: String, default: '' }
 })
 
-defineEmits(['add-variant', 'delete-variant', 'redo-variant', 'regroup-video', 'regroup-all-videos'])
+defineEmits([
+  'add-variant',
+  'delete-variant',
+  'redo-variant',
+  'regroup-video',
+  'regroup-all-videos',
+  'download-current-video',
+  'download-all-videos'
+])
 
 const selectedVideoIndex = ref(0)
 const selectedSegmentIndex = ref(0)
@@ -172,6 +194,7 @@ const canDeleteSelectedVariant = computed(() => {
 })
 
 const currentRegroupList = computed(() => currentVideo.value?.regrouped_videos || [])
+const hasAnyRegroupedVideo = computed(() => props.videoResults.some((video) => (video?.regrouped_videos || []).length > 0))
 const selectedRegroupVideo = computed(() => {
   return currentRegroupList.value.find((item) => item.regroup_index === selectedRegroupIndex.value) || currentRegroupList.value[0] || null
 })

@@ -53,6 +53,8 @@
       @redo-variant="redoVariant"
       @regroup-video="regroupCurrentVideo"
       @regroup-all-videos="regroupAllVideos"
+      @download-current-video="downloadCurrentVideoRegroupZip"
+      @download-all-videos="downloadAllVideoRegroupZip"
     />
   </div>
 </template>
@@ -67,6 +69,8 @@ import {
   addFissionVariant,
   createProcessingTask,
   deleteFissionVariant,
+  downloadAllVideoRegroups,
+  downloadCurrentVideoRegroups,
   generateAllVideoFissions,
   generateCurrentVideoFissions,
   openTaskStream,
@@ -524,6 +528,75 @@ async function regroupAllVideos() {
   } finally {
     isManagingFissionVariants.value = false
   }
+}
+
+async function downloadCurrentVideoRegroupZip(videoIndex) {
+  if (!taskId.value || videoIndex < 0) return
+  variantActionError.value = ''
+  isManagingFissionVariants.value = true
+
+  try {
+    const response = await downloadCurrentVideoRegroups(taskId.value, videoIndex)
+    triggerBrowserDownload(response, `video_${videoIndex + 1}_regroups.zip`)
+  } catch (error) {
+    variantActionError.value = await readRequestErrorMessage(error, '下载当前视频失败。')
+  } finally {
+    isManagingFissionVariants.value = false
+  }
+}
+
+async function downloadAllVideoRegroupZip() {
+  if (!taskId.value || !videoResults.value.length) return
+  variantActionError.value = ''
+  isManagingFissionVariants.value = true
+
+  try {
+    const response = await downloadAllVideoRegroups(taskId.value)
+    triggerBrowserDownload(response, 'all_regroups.zip')
+  } catch (error) {
+    variantActionError.value = await readRequestErrorMessage(error, '下载全部视频失败。')
+  } finally {
+    isManagingFissionVariants.value = false
+  }
+}
+
+function triggerBrowserDownload(response, fallbackName) {
+  const blob = response?.data instanceof Blob ? response.data : new Blob([response?.data])
+  const downloadUrl = URL.createObjectURL(blob)
+  const anchor = document.createElement('a')
+  anchor.href = downloadUrl
+  anchor.download = readDownloadName(response?.headers?.['content-disposition']) || fallbackName
+  document.body.appendChild(anchor)
+  anchor.click()
+  anchor.remove()
+  URL.revokeObjectURL(downloadUrl)
+}
+
+function readDownloadName(contentDisposition) {
+  if (!contentDisposition) return ''
+
+  const utf8Match = contentDisposition.match(/filename\*=UTF-8''([^;]+)/i)
+  if (utf8Match?.[1]) {
+    return decodeURIComponent(utf8Match[1])
+  }
+
+  const plainMatch = contentDisposition.match(/filename=\"?([^\";]+)\"?/i)
+  return plainMatch?.[1] || ''
+}
+
+async function readRequestErrorMessage(error, fallbackMessage) {
+  const blobPayload = error?.response?.data
+  if (blobPayload instanceof Blob) {
+    try {
+      const rawText = await blobPayload.text()
+      const jsonPayload = JSON.parse(rawText)
+      return jsonPayload?.error || jsonPayload?.message || fallbackMessage
+    } catch {
+      return fallbackMessage
+    }
+  }
+
+  return error?.response?.data?.error || error?.response?.data?.message || error?.message || fallbackMessage
 }
 
 function selectVideo(index) {

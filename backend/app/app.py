@@ -6,14 +6,16 @@
 3. 把 HTTP 请求转交给 `task_runtime.py` 中的后台处理逻辑。
 """
 
+import io
 import json
 import threading
+import zipfile
 from copy import deepcopy
 from dataclasses import asdict
 from pathlib import Path
 from typing import Any, Dict
 
-from flask import Flask, Response, jsonify, request, send_from_directory
+from flask import Flask, Response, jsonify, request, send_file, send_from_directory
 from flask_cors import CORS
 
 from .config import DATA_ROOT, TASK_OUTPUT_ROOT, UPLOAD_ROOT
@@ -48,6 +50,57 @@ CORS(
 )
 # 当前进程中的任务状态统一保存在这个内存仓库里。
 store = TaskStore()
+
+
+def _safe_zip_stem(raw_name: str, fallback: str) -> str:
+    """把视频名转换成适合作为 zip 名称的安全文本。"""
+
+    candidate = Path(raw_name or "").stem.strip()
+    return candidate or fallback
+
+
+def _collect_regroup_files(task, video_indexes: list[int]) -> list[tuple[Path, str]]:
+    """按当前任务状态收集需要写入 zip 的重组视频文件。"""
+
+    collected_files: list[tuple[Path, str]] = []
+
+    for video_index in video_indexes:
+        if video_index < 0 or video_index >= len(task.video_results):
+            continue
+
+        video_result = task.video_results[video_index]
+        video_folder = _safe_zip_stem(video_result.get("video_name", ""), f"video_{video_index + 1:03d}")
+
+        for regroup_video in video_result.get("regrouped_videos") or []:
+            file_path = Path(regroup_video.get("file_path") or "")
+            if not file_path.is_file():
+                continue
+
+            archive_name = f"{video_folder}/{file_path.name}"
+            collected_files.append((file_path, archive_name))
+
+    return collected_files
+
+
+def _build_regroup_download_response(task, video_indexes: list[int], download_name: str):
+    """把指定视频的重组结果打包成 zip 并直接返回下载响应。"""
+
+    regroup_files = _collect_regroup_files(task, video_indexes)
+    if not regroup_files:
+        return jsonify({"error": "当前没有可下载的重组视频。"}), 400
+
+    zip_buffer = io.BytesIO()
+    with zipfile.ZipFile(zip_buffer, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        for file_path, archive_name in regroup_files:
+            archive.write(file_path, archive_name)
+
+    zip_buffer.seek(0)
+    return send_file(
+        zip_buffer,
+        mimetype="application/zip",
+        as_attachment=True,
+        download_name=download_name,
+    )
 
 
 @app.get("/health")
@@ -274,6 +327,34 @@ def regroup_single_video(task_id: str, video_index: int) -> Any:
         return jsonify({"error": str(error)}), 400
 
     return jsonify({"videoResult": video_result, "videoResults": task.video_results, "taskLogs": task.task_logs})
+
+
+@app.get("/api/tasks/<task_id>/videos/<int:video_index>/regroup/download")
+def download_current_video_regroups(task_id: str, video_index: int) -> Any:
+    """下载当前视频的全部重组结果 zip。"""
+
+    task = store.get_task(task_id)
+    if not task:
+        return jsonify({"error": "Task not found."}), 404
+
+    if video_index < 0 or video_index >= len(task.video_results):
+        return jsonify({"error": "Video not found."}), 404
+
+    video_result = task.video_results[video_index]
+    video_stem = _safe_zip_stem(video_result.get("video_name", ""), f"video_{video_index + 1:03d}")
+    return _build_regroup_download_response(task, [video_index], f"{task_id}_{video_stem}_regroups.zip")
+
+
+@app.get("/api/tasks/<task_id>/regroup/download")
+def download_all_video_regroups(task_id: str) -> Any:
+    """下载当前任务下全部视频的重组结果 zip。"""
+
+    task = store.get_task(task_id)
+    if not task:
+        return jsonify({"error": "Task not found."}), 404
+
+    video_indexes = list(range(len(task.video_results)))
+    return _build_regroup_download_response(task, video_indexes, f"{task_id}_all_regroups.zip")
 
 
 @app.delete("/api/tasks/<task_id>")

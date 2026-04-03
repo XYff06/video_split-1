@@ -27,11 +27,6 @@ from .regrouping import export_regrouped_videos
 from .scene_pipeline import process_single_video
 
 
-def clear_regrouped_videos(task: TaskState, video_index: int) -> None:
-    video_result = task.video_results[video_index]
-    video_result["regrouped_videos"] = []
-
-
 def enqueue_event(task: TaskState, event_name: str, payload: dict[str, Any]) -> None:
     """把一个事件写入任务队列，供 SSE 接口实时消费。"""
 
@@ -332,7 +327,6 @@ def run_fission_generation(store: TaskStore, task_id: str, video_specs: list[dic
         video_size = video_spec.get("videoSize") or video_result.get("fission_size")
         video_result["fission_size"] = video_spec.get("videoSize") or video_result.get("fission_size")
         video_result["use_global_fission_size"] = not bool(video_result["fission_size"])
-        clear_regrouped_videos(task, video_index)
         video_stem = Path(video_result["video_name"]).stem
         task_root = Path(video_result["merged_segments"][0]["export_file_path"]).parents[2]
         generated_output_directory = task_root / "generated_segments" / video_stem
@@ -461,7 +455,6 @@ def add_segment_variant(store: TaskStore, task_id: str, video_index: int, segmen
     segment["generated_videos"] = generated_videos
     segment["generation_status"] = "completed"
     segment["fission_count"] = len(generated_videos)
-    clear_regrouped_videos(task, video_index)
     return deepcopy(segment)
 
 
@@ -487,9 +480,16 @@ def delete_segment_variant(store: TaskStore, task_id: str, video_index: int, seg
     remaining = [item for item in generated_videos if item["variant_index"] != variant_index]
 
     if not remaining:
-        segment["generated_videos"] = []
+        # 至少保留一个可预览结果：当最后一个变体被删除时，回退到原始片段复制版。
+        original_copy = create_original_copy_variant(
+            segment=segment,
+            output_path=build_variant_output_path(generated_output_directory, segment["group_index"], 0),
+            data_root=DATA_ROOT,
+            base_public_url=BASE_PUBLIC_URL,
+        )
+        segment["generated_videos"] = [original_copy]
         segment["fission_count"] = 0
-        segment["generation_status"] = "idle"
+        segment["generation_status"] = "completed"
     else:
         normalized_videos = []
         for next_index, item in enumerate(remaining, start=1):
@@ -510,7 +510,6 @@ def delete_segment_variant(store: TaskStore, task_id: str, video_index: int, seg
         segment["generated_videos"] = normalized_videos
         segment["fission_count"] = len(normalized_videos)
 
-    clear_regrouped_videos(task, video_index)
     return deepcopy(segment)
 
 
@@ -558,7 +557,6 @@ def redo_segment_variant(store: TaskStore, task_id: str, video_index: int, segme
         )
 
     segment["generated_videos"] = [rebuilt_variant if item["variant_index"] == variant_index else item for item in generated_videos]
-    clear_regrouped_videos(task, video_index)
     return deepcopy(segment)
 
 

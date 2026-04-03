@@ -1,4 +1,4 @@
-<template>
+﻿<template>
   <section class="panel regroup-panel">
     <div class="regroup-panel-header">
       <div>
@@ -6,13 +6,14 @@
         <p class="panel-subtitle">这里可以独立预览裂变视频和重组视频，并对单个裂变结果做增加、删除、重做。</p>
       </div>
 
-      <button
-        class="ghost-button regroup-action-button"
-        :disabled="!currentFissionVideo || isWorking"
-        @click="$emit('regroup-video', selectedFissionVideoIndex)"
-      >
-        {{ isWorking ? '处理中...' : '重新重组当前视频' }}
-      </button>
+      <label class="regroup-header-picker" v-if="videoResults.length">
+        <span>选择视频</span>
+        <select v-model.number="selectedVideoIndex">
+          <option v-for="(video, index) in videoResults" :key="`${video.video_name}-${index}`" :value="index">
+            {{ video.video_name }}
+          </option>
+        </select>
+      </label>
     </div>
 
     <p v-if="errorMessage" class="error-text">{{ errorMessage }}</p>
@@ -23,19 +24,10 @@
 
         <div class="regroup-filters">
           <label>
-            <span>视频</span>
-            <select v-model.number="selectedFissionVideoIndex">
-              <option v-for="(video, index) in videoResults" :key="`${video.video_name}-${index}`" :value="index">
-                {{ video.video_name }}
-              </option>
-            </select>
-          </label>
-
-          <label>
-            <span>原片段</span>
+            <span>选择片段</span>
             <select v-model.number="selectedSegmentIndex">
               <option
-                v-for="(segment, index) in currentFissionVideo?.merged_segments || []"
+                v-for="(segment, index) in currentVideo?.merged_segments || []"
                 :key="`segment-${segment.group_index}`"
                 :value="index"
               >
@@ -45,7 +37,7 @@
           </label>
 
           <label>
-            <span>裂变视频</span>
+            <span>选择裂变视频</span>
             <select v-model.number="selectedVariantIndex">
               <option
                 v-for="variant in currentVariantList"
@@ -77,22 +69,22 @@
         <div class="regroup-actions">
           <button
             class="primary-button"
-            :disabled="!currentFissionSegment || isWorking"
-            @click="$emit('add-variant', selectedFissionVideoIndex, selectedSegmentIndex)"
+            :disabled="!currentSegment || isWorking"
+            @click="$emit('add-variant', selectedVideoIndex, selectedSegmentIndex)"
           >
             增加一个裂变视频
           </button>
           <button
             class="danger-button"
-            :disabled="!selectedVariant || isWorking"
-            @click="$emit('delete-variant', selectedFissionVideoIndex, selectedSegmentIndex, selectedVariant.variant_index)"
+            :disabled="!canDeleteSelectedVariant || isWorking"
+            @click="$emit('delete-variant', selectedVideoIndex, selectedSegmentIndex, selectedVariant.variant_index)"
           >
             删除当前裂变视频
           </button>
           <button
             class="ghost-button"
             :disabled="!selectedVariant || isWorking"
-            @click="$emit('redo-variant', selectedFissionVideoIndex, selectedSegmentIndex, selectedVariant.variant_index)"
+            @click="$emit('redo-variant', selectedVideoIndex, selectedSegmentIndex, selectedVariant.variant_index)"
           >
             重做当前裂变视频
           </button>
@@ -102,18 +94,9 @@
       <section class="regroup-card">
         <h3>重组视频预览</h3>
 
-        <div class="regroup-filters">
+        <div class="regroup-filters regroup-filters-actions">
           <label>
-            <span>视频</span>
-            <select v-model.number="selectedRegroupVideoIndex">
-              <option v-for="(video, index) in videoResults" :key="`regroup-video-${index}`" :value="index">
-                {{ video.video_name }}
-              </option>
-            </select>
-          </label>
-
-          <label>
-            <span>重组视频</span>
+            <span>选择要预览的重组视频</span>
             <select v-model.number="selectedRegroupIndex">
               <option
                 v-for="video in currentRegroupList"
@@ -124,6 +107,21 @@
               </option>
             </select>
           </label>
+
+          <button
+            class="ghost-button"
+            :disabled="!currentVideo || isWorking"
+            @click="$emit('regroup-video', selectedVideoIndex)"
+          >
+            重组当前视频
+          </button>
+          <button
+            class="primary-button"
+            :disabled="!videoResults.length || isWorking"
+            @click="$emit('regroup-all-videos')"
+          >
+            重组全部视频
+          </button>
         </div>
 
         <div class="preview-card regroup-preview-card">
@@ -155,23 +153,25 @@ const props = defineProps({
   errorMessage: { type: String, default: '' }
 })
 
-defineEmits(['add-variant', 'delete-variant', 'redo-variant', 'regroup-video'])
+defineEmits(['add-variant', 'delete-variant', 'redo-variant', 'regroup-video', 'regroup-all-videos'])
 
-const selectedFissionVideoIndex = ref(0)
+const selectedVideoIndex = ref(0)
 const selectedSegmentIndex = ref(0)
 const selectedVariantIndex = ref(0)
-const selectedRegroupVideoIndex = ref(0)
 const selectedRegroupIndex = ref(1)
 
-const currentFissionVideo = computed(() => props.videoResults[selectedFissionVideoIndex.value] ?? null)
-const currentFissionSegment = computed(() => currentFissionVideo.value?.merged_segments?.[selectedSegmentIndex.value] ?? null)
-const currentVariantList = computed(() => currentFissionSegment.value?.generated_videos || [])
+const currentVideo = computed(() => props.videoResults[selectedVideoIndex.value] ?? null)
+const currentSegment = computed(() => currentVideo.value?.merged_segments?.[selectedSegmentIndex.value] ?? null)
+const currentVariantList = computed(() => currentSegment.value?.generated_videos || [])
 const selectedVariant = computed(() => {
   return currentVariantList.value.find((item) => item.variant_index === selectedVariantIndex.value) || currentVariantList.value[0] || null
 })
+const canDeleteSelectedVariant = computed(() => {
+  if (!selectedVariant.value) return false
+  return !(currentVariantList.value.length === 1 && selectedVariant.value.variant_index === 0)
+})
 
-const currentRegroupVideoRoot = computed(() => props.videoResults[selectedRegroupVideoIndex.value] ?? null)
-const currentRegroupList = computed(() => currentRegroupVideoRoot.value?.regrouped_videos || [])
+const currentRegroupList = computed(() => currentVideo.value?.regrouped_videos || [])
 const selectedRegroupVideo = computed(() => {
   return currentRegroupList.value.find((item) => item.regroup_index === selectedRegroupIndex.value) || currentRegroupList.value[0] || null
 })
@@ -187,27 +187,25 @@ watch(
   () => props.videoResults,
   (nextVideoResults) => {
     if (!nextVideoResults.length) {
-      selectedFissionVideoIndex.value = 0
+      selectedVideoIndex.value = 0
       selectedSegmentIndex.value = 0
       selectedVariantIndex.value = 0
-      selectedRegroupVideoIndex.value = 0
       selectedRegroupIndex.value = 1
       return
     }
 
-    selectedFissionVideoIndex.value = Math.min(selectedFissionVideoIndex.value, nextVideoResults.length - 1)
-    selectedRegroupVideoIndex.value = Math.min(selectedRegroupVideoIndex.value, nextVideoResults.length - 1)
+    selectedVideoIndex.value = Math.min(selectedVideoIndex.value, nextVideoResults.length - 1)
   },
   { deep: true, immediate: true }
 )
 
-watch(currentFissionSegment, (segment) => {
-  selectedVariantIndex.value = segment?.generated_videos?.[0]?.variant_index ?? 0
-})
-
-watch(currentFissionVideo, (video) => {
+watch(currentVideo, (video) => {
   const totalSegments = video?.merged_segments?.length ?? 0
   selectedSegmentIndex.value = totalSegments ? Math.min(selectedSegmentIndex.value, totalSegments - 1) : 0
+})
+
+watch(currentSegment, (segment) => {
+  selectedVariantIndex.value = segment?.generated_videos?.[0]?.variant_index ?? 0
 })
 
 watch(currentRegroupList, (videos) => {

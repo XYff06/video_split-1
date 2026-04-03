@@ -52,6 +52,7 @@
       @delete-variant="deleteVariant"
       @redo-variant="redoVariant"
       @regroup-video="regroupCurrentVideo"
+      @regroup-all-videos="regroupAllVideos"
     />
   </div>
 </template>
@@ -498,6 +499,28 @@ async function regroupCurrentVideo(videoIndex) {
       error?.response?.data?.message ||
       error?.message ||
       '重新重组失败。'
+  } finally {
+    isManagingFissionVariants.value = false
+  }
+}
+
+async function regroupAllVideos() {
+  if (!taskId.value || !videoResults.value.length) return
+  variantActionError.value = ''
+  isManagingFissionVariants.value = true
+
+  try {
+    for (let videoIndex = 0; videoIndex < videoResults.value.length; videoIndex += 1) {
+      const response = await regroupVideo(taskId.value, videoIndex)
+      videoResults.value = mergeVideoResultsWithLocalState(response.videoResults, videoResults.value)
+      taskLogs.value = response.taskLogs || taskLogs.value
+    }
+  } catch (error) {
+    variantActionError.value =
+      error?.response?.data?.error ||
+      error?.response?.data?.message ||
+      error?.message ||
+      '重组全部视频失败。'
   } finally {
     isManagingFissionVariants.value = false
   }

@@ -1,19 +1,8 @@
-"""Flask 应用入口。
-
-这个文件主要承担控制层职责：
-1. 创建 Flask 应用并配置跨域。
-2. 定义任务创建、SSE 订阅、媒体访问、裂变生成等接口。
-3. 把 HTTP 请求转交给 `task_runtime.py` 中的后台处理逻辑。
-"""
-
 import io
 import json
-import threading
 import zipfile
-from copy import deepcopy
-from dataclasses import asdict
 from pathlib import Path
-from typing import Any, Dict
+from typing import *
 
 from flask import Flask, Response, jsonify, request, send_file, send_from_directory
 from flask_cors import CORS
@@ -28,13 +17,11 @@ from .task_runtime import (
     regenerate_video_regroup,
     run_fission_generation,
     start_processing_task,
-    stream_task_events,
     update_video_generation_size,
 )
 
-
 app = Flask(__name__)
-# 允许本地前端开发服务器访问当前后端接口。
+# 允许本地前端开发服务器访问当前后端接口
 CORS(
     app,
     resources={
@@ -48,7 +35,7 @@ CORS(
         }
     },
 )
-# 当前进程中的任务状态统一保存在这个内存仓库里。
+# 当前进程中的任务状态统一保存在这个内存仓库里
 store = TaskStore()
 
 

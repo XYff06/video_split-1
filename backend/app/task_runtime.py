@@ -16,7 +16,6 @@ from typing import Any
 
 from .config import BASE_PUBLIC_URL, DATA_ROOT
 from .fission_service import (
-    WAN_SIZE,
     build_variant_output_path,
     create_original_copy_variant,
     generate_segment_variants,
@@ -330,7 +329,7 @@ def run_fission_generation(store: TaskStore, task_id: str, video_specs: list[dic
         video_result = task.video_results[video_index]
         if not video_result.get("merged_segments"):
             continue
-        video_size = video_spec.get("videoSize") or video_result.get("fission_size") or WAN_SIZE
+        video_size = video_spec.get("videoSize") or video_result.get("fission_size")
         video_result["fission_size"] = video_spec.get("videoSize") or video_result.get("fission_size")
         video_result["use_global_fission_size"] = not bool(video_result["fission_size"])
         clear_regrouped_videos(task, video_index)
@@ -432,7 +431,7 @@ def add_segment_variant(store: TaskStore, task_id: str, video_index: int, segmen
     video_stem = Path(video_result["video_name"]).stem
     task_root = Path(segment["export_file_path"]).parents[2]
     generated_output_directory = task_root / "generated_segments" / video_stem
-    video_size = video_result.get("fission_size") or WAN_SIZE
+    video_size = video_result.get("fission_size")
     generated_videos = list(segment.get("generated_videos") or [])
 
     def append_log(level: str, message: str):
@@ -536,7 +535,7 @@ def redo_segment_variant(store: TaskStore, task_id: str, video_index: int, segme
         task.task_logs.append(entry)
         video_result.setdefault("logs", []).append(entry)
 
-    video_size = video_result.get("fission_size") or WAN_SIZE
+    video_size = video_result.get("fission_size")
     output_path = Path(target["file_path"])
     if variant_index == 0:
         # 0 号变体代表原片复制版，所以“重做”本质上就是重新复制原片段。

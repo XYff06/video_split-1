@@ -63,6 +63,8 @@ export function mergeVideoResultsWithLocalState(nextVideoResults, previousVideoR
 
     return {
       ...videoResult,
+      fission_size: previousVideoResult?.fission_size || videoResult.fission_size || '1920*1080',
+      regrouped_videos: videoResult.regrouped_videos || [],
       merged_segments: videoResult.merged_segments.map((segment, segmentIndex) => {
         const previousSegment = previousVideoResult?.merged_segments?.[segmentIndex]
         const previousEditedPrompt = typeof previousSegment?.edited_prompt === 'string'

@@ -11,7 +11,16 @@ from flask_cors import CORS
 from .config import DATA_ROOT, TASK_OUTPUT_ROOT, UPLOAD_ROOT
 from .media_utils import cleanup_directory, save_uploaded_files
 from .models import TaskStore, make_log
-from .task_runtime import run_fission_generation, start_fission_generation, start_processing_task, stream_task_events
+from .task_runtime import (
+    add_segment_variant,
+    delete_segment_variant,
+    redo_segment_variant,
+    regenerate_video_regroup,
+    run_fission_generation,
+    start_processing_task,
+    stream_task_events,
+    update_video_generation_size,
+)
 
 
 app = Flask(__name__)
@@ -114,10 +123,11 @@ def generate_current_video_fissions(task_id: str) -> Any:
     payload = request.get_json(silent=True) or {}
     video_index = payload.get("videoIndex")
     segments = payload.get("segments") or []
+    video_size = payload.get("videoSize")
     if video_index is None or not isinstance(segments, list):
         return jsonify({"error": "缺少当前视频裂变参数。"}), 400
 
-    run_fission_generation(store, task_id, [{"videoIndex": int(video_index), "segments": segments}])
+    run_fission_generation(store, task_id, [{"videoIndex": int(video_index), "segments": segments, "videoSize": video_size}])
     return jsonify(
         {
             "message": "当前视频裂变任务已完成。",
@@ -135,8 +145,13 @@ def generate_all_video_fissions(task_id: str) -> Any:
 
     payload = request.get_json(silent=True) or {}
     videos = payload.get("videos") or []
+    global_size = payload.get("globalSize")
     if not isinstance(videos, list) or not videos:
         return jsonify({"error": "缺少全部视频裂变参数。"}), 400
+
+    for video in videos:
+        if global_size and not video.get("videoSize"):
+            video["videoSize"] = global_size
 
     run_fission_generation(store, task_id, videos)
     return jsonify(
@@ -146,6 +161,77 @@ def generate_all_video_fissions(task_id: str) -> Any:
             "taskLogs": task.task_logs,
         }
     )
+
+
+@app.post("/api/tasks/<task_id>/videos/<int:video_index>/size")
+def update_video_fission_size(task_id: str, video_index: int) -> Any:
+    task = store.get_task(task_id)
+    if not task:
+        return jsonify({"error": "Task not found."}), 404
+
+    payload = request.get_json(silent=True) or {}
+    size = payload.get("size")
+    if not size:
+        return jsonify({"error": "Missing size."}), 400
+
+    video_result = update_video_generation_size(store, task_id, video_index, size)
+    return jsonify({"videoResult": video_result, "videoResults": task.video_results, "taskLogs": task.task_logs})
+
+
+@app.post("/api/tasks/<task_id>/videos/<int:video_index>/segments/<int:segment_index>/variants")
+def add_fission_variant(task_id: str, video_index: int, segment_index: int) -> Any:
+    task = store.get_task(task_id)
+    if not task:
+        return jsonify({"error": "Task not found."}), 404
+
+    try:
+        segment = add_segment_variant(store, task_id, video_index, segment_index)
+    except Exception as error:
+        return jsonify({"error": str(error)}), 400
+
+    return jsonify({"segment": segment, "videoResults": task.video_results, "taskLogs": task.task_logs})
+
+
+@app.delete("/api/tasks/<task_id>/videos/<int:video_index>/segments/<int:segment_index>/variants/<int:variant_index>")
+def remove_fission_variant(task_id: str, video_index: int, segment_index: int, variant_index: int) -> Any:
+    task = store.get_task(task_id)
+    if not task:
+        return jsonify({"error": "Task not found."}), 404
+
+    try:
+        segment = delete_segment_variant(store, task_id, video_index, segment_index, variant_index)
+    except Exception as error:
+        return jsonify({"error": str(error)}), 400
+
+    return jsonify({"segment": segment, "videoResults": task.video_results, "taskLogs": task.task_logs})
+
+
+@app.post("/api/tasks/<task_id>/videos/<int:video_index>/segments/<int:segment_index>/variants/<int:variant_index>/redo")
+def redo_fission_variant(task_id: str, video_index: int, segment_index: int, variant_index: int) -> Any:
+    task = store.get_task(task_id)
+    if not task:
+        return jsonify({"error": "Task not found."}), 404
+
+    try:
+        segment = redo_segment_variant(store, task_id, video_index, segment_index, variant_index)
+    except Exception as error:
+        return jsonify({"error": str(error)}), 400
+
+    return jsonify({"segment": segment, "videoResults": task.video_results, "taskLogs": task.task_logs})
+
+
+@app.post("/api/tasks/<task_id>/videos/<int:video_index>/regroup")
+def regroup_single_video(task_id: str, video_index: int) -> Any:
+    task = store.get_task(task_id)
+    if not task:
+        return jsonify({"error": "Task not found."}), 404
+
+    try:
+        video_result = regenerate_video_regroup(store, task_id, video_index)
+    except Exception as error:
+        return jsonify({"error": str(error)}), 400
+
+    return jsonify({"videoResult": video_result, "videoResults": task.video_results, "taskLogs": task.task_logs})
 
 
 @app.delete("/api/tasks/<task_id>")

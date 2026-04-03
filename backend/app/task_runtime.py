@@ -6,9 +6,16 @@ from pathlib import Path
 from typing import Any
 
 from .config import BASE_PUBLIC_URL, DATA_ROOT
-from .fission_generation import generate_segment_variants
-from .media_utils import save_uploaded_files
+from .fission_service import (
+    WAN_SIZE,
+    build_variant_output_path,
+    create_original_copy_variant,
+    generate_segment_variants,
+    generate_variant_video,
+)
+from .media_utils import build_media_url, save_uploaded_files
 from .models import TaskState, TaskStore, make_log
+from .regrouping import export_regrouped_videos
 from .scene_pipeline import process_single_video
 
 
@@ -72,6 +79,8 @@ def process_task_videos(store: TaskStore, task_id: str, saved_video_paths, task_
                 "summary": {},
                 "logs": [],
                 "analysis_status": "processing",
+                "fission_size": WAN_SIZE,
+                "regrouped_videos": [],
             }
         )
         video_result_index = len(task.video_results) - 1
@@ -131,6 +140,8 @@ def process_task_videos(store: TaskStore, task_id: str, saved_video_paths, task_
         )
 
         result_payload = asdict(result)
+        result_payload["fission_size"] = task.video_results[video_result_index].get("fission_size", WAN_SIZE)
+        result_payload["regrouped_videos"] = task.video_results[video_result_index].get("regrouped_videos", [])
         task.video_results[video_result_index] = result_payload
         task.completed_videos += 1
         task.status = "completed" if task.completed_videos == task.total_videos else "processing"
@@ -206,6 +217,39 @@ def emit_segment_generation_event(task: TaskState, video_index: int, segment_ind
     )
 
 
+def emit_regrouped_videos_event(task: TaskState, video_index: int) -> None:
+    enqueue_event(
+        task,
+        "video_regrouped",
+        {
+            "taskId": task.task_id,
+            "videoIndex": video_index,
+            "videoResult": deepcopy(task.video_results[video_index]),
+            "taskStatus": task.status,
+            "taskLogs": task.task_logs,
+        },
+    )
+
+
+def rebuild_regrouped_videos(task: TaskState, video_index: int) -> list[dict]:
+    video_result = task.video_results[video_index]
+    merged_segments = video_result.get("merged_segments") or []
+    if not merged_segments:
+        video_result["regrouped_videos"] = []
+        return []
+
+    task_root = Path(merged_segments[0]["export_file_path"]).parents[2]
+    regrouped_output_directory = task_root / "regrouped_videos" / Path(video_result["video_name"]).stem
+    regrouped_videos = export_regrouped_videos(
+        segments=merged_segments,
+        regrouped_output_directory=regrouped_output_directory,
+        data_root=DATA_ROOT,
+        base_public_url=BASE_PUBLIC_URL,
+    )
+    video_result["regrouped_videos"] = regrouped_videos
+    return regrouped_videos
+
+
 def start_fission_generation(store: TaskStore, task_id: str, video_specs: list[dict]) -> None:
     thread = threading.Thread(
         target=run_fission_generation,
@@ -232,6 +276,8 @@ def run_fission_generation(store: TaskStore, task_id: str, video_specs: list[dic
         video_result = task.video_results[video_index]
         if not video_result.get("merged_segments"):
             continue
+        video_size = video_spec.get("videoSize") or video_result.get("fission_size") or WAN_SIZE
+        video_result["fission_size"] = video_size
         video_stem = Path(video_result["video_name"]).stem
         task_root = Path(video_result["merged_segments"][0]["export_file_path"]).parents[2]
         generated_output_directory = task_root / "generated_segments" / video_stem
@@ -265,6 +311,7 @@ def run_fission_generation(store: TaskStore, task_id: str, video_specs: list[dic
                     segment=segment,
                     generation_prompt=generation_prompt,
                     fission_count=fission_count,
+                    size=video_size,
                     generated_output_directory=generated_output_directory,
                     data_root=DATA_ROOT,
                     base_public_url=BASE_PUBLIC_URL,
@@ -295,9 +342,168 @@ def run_fission_generation(store: TaskStore, task_id: str, video_specs: list[dic
 
             emit_segment_generation_event(task, video_index, segment_index)
 
+        rebuild_regrouped_videos(task, video_index)
+        emit_regrouped_videos_event(task, video_index)
+
     task.task_logs.append(make_log("success", "Fission generation finished."))
     enqueue_event(
         task,
         "fission_batch_completed",
         {"taskId": task.task_id, "taskStatus": task.status, "taskLogs": task.task_logs},
     )
+
+
+def update_video_generation_size(store: TaskStore, task_id: str, video_index: int, size: str) -> dict | None:
+    task = store.get_task(task_id)
+    if not task:
+        return None
+    video_result = task.video_results[video_index]
+    video_result["fission_size"] = size
+    return deepcopy(video_result)
+
+
+def add_segment_variant(store: TaskStore, task_id: str, video_index: int, segment_index: int) -> dict | None:
+    task = store.get_task(task_id)
+    if not task:
+        return None
+
+    video_result = task.video_results[video_index]
+    segment = video_result["merged_segments"][segment_index]
+    video_stem = Path(video_result["video_name"]).stem
+    task_root = Path(segment["export_file_path"]).parents[2]
+    generated_output_directory = task_root / "generated_segments" / video_stem
+    video_size = video_result.get("fission_size") or WAN_SIZE
+    generated_videos = list(segment.get("generated_videos") or [])
+
+    def append_log(level: str, message: str):
+        entry = make_log(level, message, video_result["video_name"])
+        task.task_logs.append(entry)
+        video_result.setdefault("logs", []).append(entry)
+
+    if len(generated_videos) == 1 and generated_videos[0]["variant_index"] == 0:
+        stale_path = Path(generated_videos[0]["file_path"])
+        stale_path.unlink(missing_ok=True)
+        generated_videos = []
+
+    next_variant_index = max([variant["variant_index"] for variant in generated_videos], default=0) + 1
+    new_variant = generate_variant_video(
+        segment=segment,
+        generation_prompt=segment.get("generation_prompt") or "",
+        variant_index=next_variant_index,
+        output_path=build_variant_output_path(generated_output_directory, segment["group_index"], next_variant_index),
+        size=video_size,
+        data_root=DATA_ROOT,
+        base_public_url=BASE_PUBLIC_URL,
+        append_log=append_log,
+    )
+    generated_videos.append(new_variant)
+
+    segment["generated_videos"] = generated_videos
+    segment["generation_status"] = "completed"
+    segment["fission_count"] = len(generated_videos)
+    rebuild_regrouped_videos(task, video_index)
+    return deepcopy(segment)
+
+
+def delete_segment_variant(store: TaskStore, task_id: str, video_index: int, segment_index: int, variant_index: int) -> dict | None:
+    task = store.get_task(task_id)
+    if not task:
+        return None
+
+    video_result = task.video_results[video_index]
+    segment = video_result["merged_segments"][segment_index]
+    video_stem = Path(video_result["video_name"]).stem
+    task_root = Path(segment["export_file_path"]).parents[2]
+    generated_output_directory = task_root / "generated_segments" / video_stem
+
+    generated_videos = sorted(segment.get("generated_videos") or [], key=lambda item: item["variant_index"])
+    target = next((item for item in generated_videos if item["variant_index"] == variant_index), None)
+    if not target:
+        raise RuntimeError("Variant not found")
+
+    Path(target["file_path"]).unlink(missing_ok=True)
+    remaining = [item for item in generated_videos if item["variant_index"] != variant_index]
+
+    if not remaining:
+        original_copy = create_original_copy_variant(
+            segment=segment,
+            output_path=build_variant_output_path(generated_output_directory, segment["group_index"], 0),
+            data_root=DATA_ROOT,
+            base_public_url=BASE_PUBLIC_URL,
+        )
+        segment["generated_videos"] = [original_copy]
+        segment["fission_count"] = 0
+    else:
+        normalized_videos = []
+        for next_index, item in enumerate(remaining, start=1):
+            current_path = Path(item["file_path"])
+            target_path = build_variant_output_path(generated_output_directory, segment["group_index"], next_index)
+            if current_path.resolve() != target_path.resolve():
+                target_path.unlink(missing_ok=True)
+                current_path.replace(target_path)
+            normalized_videos.append(
+                {
+                    **item,
+                    "variant_index": next_index,
+                    "file_path": str(target_path.resolve()),
+                    "public_url": build_media_url(BASE_PUBLIC_URL, DATA_ROOT, target_path.resolve()),
+                }
+            )
+        segment["generated_videos"] = normalized_videos
+        segment["fission_count"] = len(normalized_videos)
+
+    rebuild_regrouped_videos(task, video_index)
+    return deepcopy(segment)
+
+
+def redo_segment_variant(store: TaskStore, task_id: str, video_index: int, segment_index: int, variant_index: int) -> dict | None:
+    task = store.get_task(task_id)
+    if not task:
+        return None
+
+    video_result = task.video_results[video_index]
+    segment = video_result["merged_segments"][segment_index]
+    generated_videos = sorted(segment.get("generated_videos") or [], key=lambda item: item["variant_index"])
+    target = next((item for item in generated_videos if item["variant_index"] == variant_index), None)
+    if not target:
+        raise RuntimeError("Variant not found")
+
+    Path(target["file_path"]).unlink(missing_ok=True)
+
+    def append_log(level: str, message: str):
+        entry = make_log(level, message, video_result["video_name"])
+        task.task_logs.append(entry)
+        video_result.setdefault("logs", []).append(entry)
+
+    video_size = video_result.get("fission_size") or WAN_SIZE
+    output_path = Path(target["file_path"])
+    if variant_index == 0:
+        rebuilt_variant = create_original_copy_variant(
+            segment=segment,
+            output_path=output_path,
+            data_root=DATA_ROOT,
+            base_public_url=BASE_PUBLIC_URL,
+        )
+    else:
+        rebuilt_variant = generate_variant_video(
+            segment=segment,
+            generation_prompt=segment.get("generation_prompt") or "",
+            variant_index=variant_index,
+            output_path=output_path,
+            size=video_size,
+            data_root=DATA_ROOT,
+            base_public_url=BASE_PUBLIC_URL,
+            append_log=append_log,
+        )
+
+    segment["generated_videos"] = [rebuilt_variant if item["variant_index"] == variant_index else item for item in generated_videos]
+    rebuild_regrouped_videos(task, video_index)
+    return deepcopy(segment)
+
+
+def regenerate_video_regroup(store: TaskStore, task_id: str, video_index: int) -> dict | None:
+    task = store.get_task(task_id)
+    if not task:
+        return None
+    rebuild_regrouped_videos(task, video_index)
+    return deepcopy(task.video_results[video_index])

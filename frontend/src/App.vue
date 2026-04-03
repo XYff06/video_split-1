@@ -30,14 +30,27 @@
       />
     </main>
 
-    <PromptFissionPanel
+    <PromptWorkspacePanel
       :current-video-result="currentVideoResult"
       :current-segment="currentSegment"
       :is-generating-current-video="isGeneratingCurrentVideo"
       :is-generating-all-videos="isGeneratingAllVideos"
       :action-error-message="fissionErrorMessage"
+      :global-size="globalFissionSize"
       @generate-current-video="generateCurrentVideo"
       @generate-all-videos="generateAllVideos"
+      @change-current-video-size="changeCurrentVideoSize"
+      @change-global-size="changeGlobalSize"
+    />
+
+    <FissionRegroupPanel
+      :video-results="videoResults"
+      :is-working="isManagingFissionVariants"
+      :error-message="variantActionError"
+      @add-variant="addVariant"
+      @delete-variant="deleteVariant"
+      @redo-variant="redoVariant"
+      @regroup-video="regroupCurrentVideo"
     />
   </div>
 </template>
@@ -46,12 +59,18 @@
 import { computed, onBeforeUnmount, ref } from 'vue'
 import UploadPanel from './components/UploadPanel.vue'
 import ResultPanel from './components/ResultPanel.vue'
-import PromptFissionPanel from './components/PromptFissionPanel.vue'
+import PromptWorkspacePanel from './components/PromptWorkspacePanel.vue'
+import FissionRegroupPanel from './components/FissionRegroupPanel.vue'
 import {
+  addFissionVariant,
   createProcessingTask,
+  deleteFissionVariant,
   generateAllVideoFissions,
   generateCurrentVideoFissions,
-  openTaskStream
+  openTaskStream,
+  redoFissionVariant,
+  regroupVideo,
+  updateVideoFissionSize
 } from './services/api'
 import {
   composeSegmentGenerationPrompt,
@@ -73,6 +92,9 @@ const currentVideoPage = ref(0)
 const isGeneratingCurrentVideo = ref(false)
 const isGeneratingAllVideos = ref(false)
 const fissionErrorMessage = ref('')
+const globalFissionSize = ref('1920*1080')
+const isManagingFissionVariants = ref(false)
+const variantActionError = ref('')
 
 const allowedVideoExtensions = ['mp4', 'mov', 'mkv', 'avi', 'webm', 'm4v', 'wmv']
 
@@ -222,6 +244,22 @@ function connectSseStream(newTaskId) {
       }
       ensureSegmentLocalState(targetVideo.merged_segments[payload.segmentIndex])
     },
+    onSegmentGenerationUpdate(payload) {
+      taskLogs.value = payload.taskLogs || []
+      const targetVideo = videoResults.value[payload.videoIndex]
+      if (!targetVideo?.merged_segments) return
+      const previousSegment = targetVideo.merged_segments[payload.segmentIndex]
+      targetVideo.merged_segments[payload.segmentIndex] = {
+        ...previousSegment,
+        ...payload.segment
+      }
+      ensureSegmentLocalState(targetVideo.merged_segments[payload.segmentIndex])
+    },
+    onVideoRegrouped(payload) {
+      taskLogs.value = payload.taskLogs || []
+      const previousVideoResult = videoResults.value[payload.videoIndex]
+      videoResults.value[payload.videoIndex] = mergeVideoResultsWithLocalState([payload.videoResult], [previousVideoResult])[0]
+    },
     onVideoResult(payload) {
       completedVideos.value = payload.completedVideos
       totalVideos.value = payload.totalVideos
@@ -281,7 +319,11 @@ function buildVideoGenerationPayload(videoResult, videoIndex) {
     }
   })
 
-  return { videoIndex, segments }
+  return {
+    videoIndex,
+    videoSize: videoResult?.fission_size || globalFissionSize.value,
+    segments
+  }
 }
 
 async function generateCurrentVideo() {
@@ -314,6 +356,7 @@ async function generateAllVideos() {
 
   try {
     const payload = {
+      globalSize: globalFissionSize.value,
       videos: videoResults.value.map((videoResult, videoIndex) => buildVideoGenerationPayload(videoResult, videoIndex))
     }
     const response = await generateAllVideoFissions(taskId.value, payload)
@@ -327,6 +370,108 @@ async function generateAllVideos() {
       '全部视频裂变失败，请稍后重试。'
   } finally {
     isGeneratingAllVideos.value = false
+  }
+}
+
+async function changeCurrentVideoSize(size) {
+  if (!taskId.value || selectedVideoIndex.value < 0 || !currentVideoResult.value) return
+  variantActionError.value = ''
+  currentVideoResult.value.fission_size = size
+
+  try {
+    const response = await updateVideoFissionSize(taskId.value, selectedVideoIndex.value, size)
+    videoResults.value = mergeVideoResultsWithLocalState(response.videoResults, videoResults.value)
+    taskLogs.value = response.taskLogs || taskLogs.value
+  } catch (error) {
+    variantActionError.value =
+      error?.response?.data?.error ||
+      error?.response?.data?.message ||
+      error?.message ||
+      '更新当前视频 size 失败。'
+  }
+}
+
+function changeGlobalSize(size) {
+  globalFissionSize.value = size
+}
+
+async function addVariant(videoIndex, segmentIndex) {
+  if (!taskId.value) return
+  variantActionError.value = ''
+  isManagingFissionVariants.value = true
+
+  try {
+    const response = await addFissionVariant(taskId.value, videoIndex, segmentIndex)
+    videoResults.value = mergeVideoResultsWithLocalState(response.videoResults, videoResults.value)
+    taskLogs.value = response.taskLogs || taskLogs.value
+  } catch (error) {
+    variantActionError.value =
+      error?.response?.data?.error ||
+      error?.response?.data?.message ||
+      error?.message ||
+      '增加裂变视频失败。'
+  } finally {
+    isManagingFissionVariants.value = false
+  }
+}
+
+async function deleteVariant(videoIndex, segmentIndex, variantIndex) {
+  if (!taskId.value) return
+  variantActionError.value = ''
+  isManagingFissionVariants.value = true
+
+  try {
+    const response = await deleteFissionVariant(taskId.value, videoIndex, segmentIndex, variantIndex)
+    videoResults.value = mergeVideoResultsWithLocalState(response.videoResults, videoResults.value)
+    taskLogs.value = response.taskLogs || taskLogs.value
+  } catch (error) {
+    variantActionError.value =
+      error?.response?.data?.error ||
+      error?.response?.data?.message ||
+      error?.message ||
+      '删除裂变视频失败。'
+  } finally {
+    isManagingFissionVariants.value = false
+  }
+}
+
+async function redoVariant(videoIndex, segmentIndex, variantIndex) {
+  if (!taskId.value) return
+  variantActionError.value = ''
+  isManagingFissionVariants.value = true
+
+  try {
+    const response = await redoFissionVariant(taskId.value, videoIndex, segmentIndex, variantIndex)
+    videoResults.value = mergeVideoResultsWithLocalState(response.videoResults, videoResults.value)
+    taskLogs.value = response.taskLogs || taskLogs.value
+  } catch (error) {
+    variantActionError.value =
+      error?.response?.data?.error ||
+      error?.response?.data?.message ||
+      error?.message ||
+      '重做裂变视频失败。'
+  } finally {
+    isManagingFissionVariants.value = false
+  }
+}
+
+async function regroupCurrentVideo(videoIndex) {
+  if (!taskId.value || videoIndex < 0) return
+  variantActionError.value = ''
+  isManagingFissionVariants.value = true
+
+  try {
+    const response = await regroupVideo(taskId.value, videoIndex)
+    videoResults.value = mergeVideoResultsWithLocalState(response.videoResults, videoResults.value)
+    taskLogs.value = response.taskLogs || taskLogs.value
+  } catch (error) {
+    variantActionError.value =
+      error?.response?.data?.error ||
+      error?.response?.data?.message ||
+      error?.message ||
+      '重新重组失败。'
+  } finally {
+    isManagingFissionVariants.value = false
   }
 }
 

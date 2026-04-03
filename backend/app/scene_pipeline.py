@@ -210,9 +210,10 @@ def merge_grouped_scene_files(
                 "analysis": None,
                 "analysis_error_message": None,
                 "fission_count": 1,
+                "generated_videos": [],
                 "generation_status": "idle",
                 "generation_error_message": None,
-                "generated_videos": [],
+                "generation_prompt": "",
             }
         )
 

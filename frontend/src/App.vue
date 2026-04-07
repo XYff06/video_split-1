@@ -12,59 +12,46 @@
         @submit="startProcessing"
       />
 
-      <ResultPanel
+      <UnifiedWorkbench
         :status-text="resultStatusText"
         :video-results="videoResults"
         :selected-video-index="selectedVideoIndex"
         :current-video-page="currentVideoPage"
         :current-video-result="currentVideoResult"
         :current-segment="currentSegment"
+        :current-segment-index="selectedSegmentIndex"
         :current-video-logs="currentVideoLogs"
         :task-logs="taskLogs"
-        :can-previous-segment="canPreviousSegment"
-        :can-next-segment="canNextSegment"
+        :is-generating-current-video="isGeneratingCurrentVideo"
+        :is-generating-all-videos="isGeneratingAllVideos"
+        :action-error-message="fissionErrorMessage"
+        :global-size="globalFissionSize"
+        :is-working="isManagingFissionVariants"
+        :error-message="variantActionError"
         @select-video="selectVideo"
         @change-video-page="setVideoPage"
-        @prev-segment="goToPreviousSegment"
-        @next-segment="goToNextSegment"
+        @select-segment="selectSegment"
+        @generate-current-video="generateCurrentVideo"
+        @generate-all-videos="generateAllVideos"
+        @change-current-video-size="changeCurrentVideoSize"
+        @change-global-size="changeGlobalSize"
+        @reset-current-video-size="resetCurrentVideoSize"
+        @add-variant="addVariant"
+        @delete-variant="deleteVariant"
+        @redo-variant="redoVariant"
+        @regroup-video="regroupCurrentVideo"
+        @regroup-all-videos="regroupAllVideos"
+        @download-current-video="downloadCurrentVideoRegroupZip"
+        @download-all-videos="downloadAllVideoRegroupZip"
       />
     </main>
-
-    <PromptWorkspacePanel
-      :current-video-result="currentVideoResult"
-      :current-segment="currentSegment"
-      :is-generating-current-video="isGeneratingCurrentVideo"
-      :is-generating-all-videos="isGeneratingAllVideos"
-      :action-error-message="fissionErrorMessage"
-      :global-size="globalFissionSize"
-      @generate-current-video="generateCurrentVideo"
-      @generate-all-videos="generateAllVideos"
-      @change-current-video-size="changeCurrentVideoSize"
-      @change-global-size="changeGlobalSize"
-      @reset-current-video-size="resetCurrentVideoSize"
-    />
-
-    <FissionRegroupPanel
-      :video-results="videoResults"
-      :is-working="isManagingFissionVariants"
-      :error-message="variantActionError"
-      @add-variant="addVariant"
-      @delete-variant="deleteVariant"
-      @redo-variant="redoVariant"
-      @regroup-video="regroupCurrentVideo"
-      @regroup-all-videos="regroupAllVideos"
-      @download-current-video="downloadCurrentVideoRegroupZip"
-      @download-all-videos="downloadAllVideoRegroupZip"
-    />
   </div>
 </template>
 
 <script setup>
 import { computed, onBeforeUnmount, ref } from 'vue'
 import UploadPanel from './components/UploadPanel.vue'
-import ResultPanel from './components/ResultPanel.vue'
-import PromptWorkspacePanel from './components/PromptWorkspacePanel.vue'
-import FissionRegroupPanel from './components/FissionRegroupPanel.vue'
+import UnifiedWorkbench from './components/UnifiedWorkbench.vue'
 import {
   addFissionVariant,
   createProcessingTask,
@@ -113,11 +100,6 @@ const currentSegment = computed(() => {
   return activeVideo.merged_segments[selectedSegmentIndex.value] ?? null
 })
 const currentVideoLogs = computed(() => currentVideoResult.value?.logs ?? [])
-const canPreviousSegment = computed(() => selectedSegmentIndex.value > 0)
-const canNextSegment = computed(() => {
-  const totalSegments = currentVideoResult.value?.merged_segments?.length ?? 0
-  return selectedSegmentIndex.value < totalSegments - 1
-})
 const resultStatusText = computed(() => {
   if (taskStatus.value === 'processing') {
     return `正在持续接收处理结果，已完成 ${completedVideos.value} / ${totalVideos.value}`
@@ -608,12 +590,8 @@ function setVideoPage(page) {
   currentVideoPage.value = page
 }
 
-function goToPreviousSegment() {
-  if (canPreviousSegment.value) selectedSegmentIndex.value -= 1
-}
-
-function goToNextSegment() {
-  if (canNextSegment.value) selectedSegmentIndex.value += 1
+function selectSegment(index) {
+  selectedSegmentIndex.value = index
 }
 
 onBeforeUnmount(() => {
